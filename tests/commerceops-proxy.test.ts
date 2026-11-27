@@ -1,9 +1,13 @@
 import { describe, expect, test } from 'vitest';
 import {
   COMMERCEOPS_MCP_PRESET,
+  canonicalCommerceIdentity,
   forwardCommerceOps,
+  signCommerceOpsIdentity,
+  stripUntrustedCommerceBody,
   upstreamPath,
 } from '../src/routes/commerceops.js';
+import { hasPermission } from '../src/permissions.js';
 
 describe('CommerceOps proxy', () => {
   test('maps the OpenDot prefix onto the Python service', () => {
@@ -72,5 +76,44 @@ describe('CommerceOps proxy', () => {
     expect(COMMERCEOPS_MCP_PRESET.id).toBe('commerceops');
     expect(COMMERCEOPS_MCP_PRESET.command).toBe('commerceops-mcp');
     expect(COMMERCEOPS_MCP_PRESET.id).not.toBe('miniclaw');
+  });
+
+  test('signs the identity OpenDot forwards and strips client actor fields', () => {
+    const payload = canonicalCommerceIdentity({
+      userId: 'user-1',
+      username: 'ada',
+      workspaceId: 'ws-a',
+      canApprove: false,
+      exp: 1_700_000_000,
+    });
+    expect(payload).toBe(
+      '{"can_approve":false,"exp":1700000000,"scope":"commerceops","user_id":"user-1","username":"ada","v":1,"workspace_id":"ws-a"}',
+    );
+    const token = signCommerceOpsIdentity(
+      {
+        userId: 'user-1',
+        username: 'ada',
+        workspaceId: 'ws-a',
+        canApprove: false,
+      },
+      'test-signing-secret-32chars',
+      1_700_000_000_000,
+    );
+    expect(token.startsWith(payload.replace('"exp":1700000000', '"exp":1700000060'))).toBe(
+      true,
+    );
+    const stripped = stripUntrustedCommerceBody(
+      new TextEncoder().encode(
+        JSON.stringify({ approver: 'owner', created_by: 'owner', note: 'ok' }),
+      ).buffer,
+      'application/json',
+    );
+    expect(JSON.parse(new TextDecoder().decode(stripped))).toEqual({ note: 'ok' });
+    expect(hasPermission({ role: 'member', permissions: [] }, 'approve_commerceops')).toBe(
+      false,
+    );
+    expect(hasPermission({ role: 'admin', permissions: [] }, 'approve_commerceops')).toBe(
+      true,
+    );
   });
 });

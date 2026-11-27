@@ -5,6 +5,23 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/services/commerceops"
 
+load_env() {
+  local file="$1"
+  if [[ -f "$file" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$file"
+    set +a
+  fi
+}
+
+load_env "$ROOT/.env.commerceops.example"
+load_env "$ROOT/.env.commerceops"
+
+if [[ "${COMMERCEOPS_ALLOW_PUBLIC_BIND:-0}" != "1" ]]; then
+  export COMMERCEOPS_HOST=127.0.0.1
+fi
+
 if [[ ! -d .venv ]]; then
   python3 -m venv .venv
 fi

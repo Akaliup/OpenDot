@@ -72,7 +72,10 @@ def test_price_engine_matches_the_hand_calculation():
 def test_price_and_weekly_http_round_trip(client, database_url):
     assert client.post("/api/v1/seed").status_code == 200
     health = client.get("/health").json()
-    assert health["formula_versions"]["price_sim"] == "price_sim.v1"
+    assert health["status"] == "ok"
+    assert "formula_versions" not in health
+    formulas = client.get("/api/v1/formulas").json()
+    assert formulas["versions"]["price_sim"] == "price_sim.v1"
     assert "volume_multiplier" in client.get("/api/v1/formulas").json()["formulas"]["price_sim.v1"]
     denied = client.post(
         "/api/v1/price-simulations",
@@ -141,8 +144,8 @@ def test_weekly_report_leaves_a_pending_draft_alone(seeded):
     assert report["approvals"]["pending"] == 1
     assert report["approvals"]["purchase_orders"] == 0
     assert "Pending drafts: 1" in report["markdown"]
-    first = approve_and_execute_draft(seeded, created["draft_id"], "owner", "once")
-    second = approve_and_execute_draft(seeded, created["draft_id"], "owner", "twice")
+    first = approve_and_execute_draft(seeded, created["draft_id"], "owner", "once", authorized=True)
+    second = approve_and_execute_draft(seeded, created["draft_id"], "owner", "twice", authorized=True)
     assert first["replayed"] is False
     assert second["replayed"] is True
     assert second["execution_ref"] == first["execution_ref"]

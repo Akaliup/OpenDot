@@ -191,9 +191,21 @@ def rank_suppliers(
             min_on_time_sample=MIN_ON_TIME_SAMPLE,
             rankings=(),
         )
-    grouped: dict[str, list[SupplierQuoteInput]] = {}
     for quote in quotes:
         _prepare(quote)
+    currencies = {quote.currency for quote in quotes}
+    if len(currencies) > 1:
+        return SupplierRankResult(
+            formula_version=FORMULA_VERSION,
+            status="mixed_currency_unsupported",
+            ranked=False,
+            weights=dict(WEIGHTS),
+            weight_note=WEIGHT_NOTE,
+            min_on_time_sample=MIN_ON_TIME_SAMPLE,
+            rankings=(),
+        )
+    grouped: dict[str, list[SupplierQuoteInput]] = {}
+    for quote in quotes:
         grouped.setdefault(quote.supplier_code, []).append(quote)
     for group in grouped.values():
         _assert_consistent(group)

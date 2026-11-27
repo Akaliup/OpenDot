@@ -683,7 +683,8 @@ export type Permission =
   | 'manage_users'
   | 'manage_invites'
   | 'view_audit_log'
-  | 'manage_billing';
+  | 'manage_billing'
+  | 'approve_commerceops';
 
 export type PermissionTemplateKey =
   | 'admin_full'

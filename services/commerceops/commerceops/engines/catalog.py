@@ -45,12 +45,14 @@ FORMULAS = {
         "average_daily_sales": "units ordered in the lookback / lookback_days; refunds are not removed",
         "days_of_cover": "available / average_daily_sales, or null status undefined_no_velocity when velocity is 0",
         "reorder_point": "average_daily_sales * lead_time_days + safety_stock, null when velocity is 0",
-        "suggested_order_qty": "ceiling of average_daily_sales * (lead_time + target_cover) + safety_stock - available - inbound",
+        "suggested_order_qty": "ceiling of average_daily_sales * (lead_time + target_cover) + safety_stock - available - effective_inbound",
+        "effective_inbound": "inbound with an ETA on or before the stockout date; late inbound and inbound with no ETA do not offset",
     },
     SUPPLIER_VERSION: {
         "landed_unit_cost": "unit_price * (1 + duty_rate) + freight_per_unit",
         "weights": WEIGHT_NOTE,
         "moq": "raw need of 0 stays 0; a positive need is snapped to the order multiple and then to MOQ",
+        "currency": "every quote in one comparison must share a currency; mixed currencies return mixed_currency_unsupported",
     },
     COMPETITOR_VERSION: {
         "price_drop": "price change percent <= -0.03",

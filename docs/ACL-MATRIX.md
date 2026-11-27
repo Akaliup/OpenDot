@@ -226,7 +226,7 @@ read-only 投影按 host-issued turn ID 精确匹配当前或已接纳的 queued
 | `/api/billing/admin/*`                            | `manage_billing`                                   |
 | `/api/docker/pull`、运行监控管理                  | `manage_system_config`                             |
 | `/api/status/channel-outbox/*` 人工裁决           | `manage_system_config`                             |
-| `/api/commerceops/*`                                  | 已登录 Cookie Session。代理到本机 CommerceOps，不授予其他用户资源 |
+| `/api/commerceops/*`                                  | 已登录，且只能访问自己有权限的 Workspace。批准、拒绝和执行还需要 `approve_commerceops`（管理员角色默认具备） |
 | `POST /api/groups/:jid/reset-owner`               | admin break-glass，同时仍验证目标资源              |
 
 系统 MCP 默认仅 admin 可用；只有显式设置为 shared 后，普通成员的 Agent 才能进入

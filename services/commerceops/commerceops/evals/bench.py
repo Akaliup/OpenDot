@@ -16,6 +16,7 @@ import tempfile
 
 from sqlalchemy import func, select
 
+from commerceops.context import DEMO_WORKSPACE, bind_workspace, reset_workspace
 from commerceops.clock import utc_now
 from commerceops.db import session_factory_for
 from commerceops.errors import CommerceOpsError, NoActionRequired
@@ -56,14 +57,19 @@ def _case(case_id: str, title: str, minutes: int, *, formula: bool, policy: bool
 
 
 def _fresh(work) -> dict:  # type: ignore[no-untyped-def]
-    with tempfile.TemporaryDirectory() as directory:
-        url = f"sqlite:///{directory}/bench.db"
-        session = session_factory_for(url)()
-        try:
-            seed_demo_data(session)
-            return work(session, url)
-        finally:
-            session.close()
+    workspace = os.environ.get("COMMERCEOPS_WORKSPACE_ID", DEMO_WORKSPACE)
+    token = bind_workspace(workspace)
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            url = f"sqlite:///{directory}/bench.db"
+            session = session_factory_for(url)()
+            try:
+                seed_demo_data(session, workspace)
+                return work(session, url)
+            finally:
+                session.close()
+    finally:
+        reset_workspace(token)
 
 
 def case_profit_bridge(_session, _url) -> dict:
@@ -142,13 +148,25 @@ def case_ads(_session, _url) -> dict:
         from fastapi.testclient import TestClient
 
         from commerceops.api.app import create_app
+        from commerceops.identity import issue_identity
+        from commerceops.context import DEMO_WORKSPACE
 
         client = TestClient(create_app(url))
+        headers = {
+            "x-commerceops-identity": issue_identity(
+                user_id="eval",
+                username="eval",
+                workspace_id=DEMO_WORKSPACE,
+                can_approve=True,
+                ttl_seconds=600,
+            )
+        }
         denied = client.post(
             f"/api/v1/drafts/{created['draft_id']}/execute",
             json={"actor": "eval"},
+            headers=headers,
         )
-        audit = client.get(f"/api/v1/drafts/{created['draft_id']}/audit").json()
+        audit = client.get(f"/api/v1/drafts/{created['draft_id']}/audit", headers=headers).json()
         assertions = [
             _check("exact_acos", exact["current"].acos.value == Decimal("0.75"), "0.75", str(exact["current"].acos.value)),
             _check("exact_cut", exact["budget"].suggested_daily_budget == Decimal("31.50"), "31.50", str(exact["budget"].suggested_daily_budget)),
@@ -196,7 +214,7 @@ def case_suppliers(_session, _url) -> dict:
         ranked = report["rank"].rankings
         assertions = [
             _check("order", [row.supplier_code for row in ranked] == ["SUP-SZR", "SUP-VNF", "SUP-NBV"], "SZR, VNF, NBV", str([row.supplier_code for row in ranked])),
-            _check("qty", [row.adjusted_order_qty for row in ranked] == [200, 240, 300], "200, 240, 300", str([row.adjusted_order_qty for row in ranked])),
+            _check("qty", [row.adjusted_order_qty for row in ranked] == [210, 250, 300], "210, 250, 300", str([row.adjusted_order_qty for row in ranked])),
             _check("landed", ranked[0].landed_cost == Decimal("2.82"), "2.82", str(ranked[0].landed_cost)),
             _check(
                 "weights",
@@ -248,8 +266,8 @@ def case_replay(_session, _url) -> dict:
             end=CURRENT_END,
             created_by="eval",
         )
-        first = approve_and_execute_draft(session, created["draft_id"], "owner", "eval")
-        second = approve_and_execute_draft(session, created["draft_id"], "owner", "replay")
+        first = approve_and_execute_draft(session, created["draft_id"], "owner", "eval", authorized=True)
+        second = approve_and_execute_draft(session, created["draft_id"], "owner", "replay", authorized=True)
         revisions = session.scalar(select(func.count()).select_from(AdBudgetRevision))
         assertions = [
             _check("first", first["replayed"] is False, "false", str(first["replayed"])),
@@ -272,10 +290,10 @@ def case_rejected_and_stale(_session, _url) -> dict:
             end=CURRENT_END,
             created_by="eval",
         )
-        reject_draft(session, lamp["draft_id"], "owner", "no")
+        reject_draft(session, lamp["draft_id"], "owner", "no", authorized=True)
         rejected_code = ""
         try:
-            approve_and_execute_draft(session, lamp["draft_id"], "owner", "later")
+            approve_and_execute_draft(session, lamp["draft_id"], "owner", "later", authorized=True)
         except CommerceOpsError as exc:
             rejected_code = exc.code
         broad = create_ad_budget_draft(
@@ -291,7 +309,7 @@ def case_rejected_and_stale(_session, _url) -> dict:
         session.commit()
         stale_code = ""
         try:
-            approve_and_execute_draft(session, broad["draft_id"], "owner", "stale")
+            approve_and_execute_draft(session, broad["draft_id"], "owner", "stale", authorized=True)
         except CommerceOpsError as exc:
             stale_code = exc.code
         revisions = session.scalar(select(func.count()).select_from(AdBudgetRevision))
@@ -321,8 +339,8 @@ def case_restart(_session, _url) -> dict:
         try:
             loaded = get_draft(reopened, draft_id)
             pending_orders = reopened.scalar(select(func.count()).select_from(PurchaseOrder))
-            first = approve_and_execute_draft(reopened, draft_id, "owner", "after restart")
-            second = approve_and_execute_draft(reopened, draft_id, "owner", "replay after restart")
+            first = approve_and_execute_draft(reopened, draft_id, "owner", "after restart", authorized=True)
+            second = approve_and_execute_draft(reopened, draft_id, "owner", "replay after restart", authorized=True)
             orders = reopened.scalar(select(func.count()).select_from(PurchaseOrder))
             audit = [entry["event"] for entry in list_audit(reopened, draft_id)["entries"]]
         finally:
@@ -563,6 +581,8 @@ def run_bench(out_dir: Path | None = None) -> dict:
             "passed": passed,
             "failed": len(cases) - passed,
             "ops_minutes_saved": sum(case["ops_minutes_saved"] for case in cases if case["passed"]),
+            "ops_minutes_saved_basis": "planning_estimate",
+            "ops_minutes_saved_label": "规划估算",
             "measured_model_tokens": 0,
             "estimated_relay_tokens": sum(case["estimated_relay_tokens"] for case in cases),
             "token_note": (
@@ -615,7 +635,7 @@ li {{ margin: 0.2rem 0; }}
 </head>
 <body>
 <h1>CommerceOps eval scorecard</h1>
-<p>{summary['passed']}/{summary['cases']} passed. Ops minutes saved {summary['ops_minutes_saved']}. Measured model tokens {summary['measured_model_tokens']}. Relay ceiling {summary['estimated_relay_tokens']}.</p>
+<p>{summary['passed']}/{summary['cases']} passed. Planning estimate (规划估算) of ops minutes saved {summary['ops_minutes_saved']}. Measured model tokens {summary['measured_model_tokens']}. Relay ceiling {summary['estimated_relay_tokens']}.</p>
 <p>{_esc(summary['token_note'])}</p>
 {''.join(rows)}
 </body>

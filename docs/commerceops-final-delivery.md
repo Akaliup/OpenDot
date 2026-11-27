@@ -25,7 +25,6 @@ flowchart LR
   Skill --> MCP --> Engines
   API --> Engines
   API --> Gate
-  MCP --> Gate
   Engines --> DB
   Gate --> DB
   API -->|dry-run or webhook| Feishu[Feishu card]
@@ -33,8 +32,9 @@ flowchart LR
 
 OpenDot decides who may call a tool. CommerceOps decides whether a business
 write is legal. Draft tools do not change a budget, a purchase order, or a
-competitor snapshot. `commerceops_approve_and_execute_draft` is the only apply
-path. Repeating it returns the same `execution_ref` and writes `replay_noop`.
+competitor snapshot. Agents cannot approve. The only apply path is the signed
+OpenDot route `POST /api/v1/drafts/{id}/approve-and-execute`. Repeating it
+returns the same `execution_ref` and writes `replay_noop`.
 
 ## Directory
 
@@ -144,7 +144,7 @@ stays inside OpenDot.
 | Price simulation                                            | `POST /api/v1/price-simulations`                                                          | `simulate_price_change`                                                                                                                                                                                        |
 | Weekly report                                               | `POST /api/v1/reports/weekly`                                                             | `generate_weekly_report`                                                                                                                                                                                       |
 | Drafts                                                      | `POST /api/v1/ads/budget-drafts`, `/purchase-order-drafts`, `/competitor-response-drafts` | `commerceops_create_*_draft`                                                                                                                                                                                   |
-| Approve once                                                | `POST /api/v1/drafts/{id}/approve-and-execute`                                            | `commerceops_approve_and_execute_draft`                                                                                                                                                                        |
+| Approve once                                                | `POST /api/v1/drafts/{id}/approve-and-execute`                                            | not exposed to the agent                                                                                                                                                                                       |
 | Bare execute                                                | `POST /api/v1/drafts/{id}/execute` returns 409 `unapproved_execution`                     | not exposed                                                                                                                                                                                                    |
 
 `target_price` is a decimal string from the browser through JSON into

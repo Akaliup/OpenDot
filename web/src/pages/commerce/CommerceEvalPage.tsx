@@ -93,8 +93,8 @@ export function CommerceEvalPage() {
                 : ''}
             </h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              估计节省运营时间 {scorecard.summary.ops_minutes_saved}{' '}
-              分钟。实测模型 token {scorecard.summary.measured_model_tokens}
+              规划估算运营时间 {scorecard.summary.ops_minutes_saved}{' '}
+              分钟，不是实测节省。实测模型 token {scorecard.summary.measured_model_tokens}
               。若只由模型转述工具结果，上限{' '}
               {scorecard.summary.estimated_relay_tokens} token。
             </p>

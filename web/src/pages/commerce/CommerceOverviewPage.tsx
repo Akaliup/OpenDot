@@ -313,13 +313,17 @@ export function CommerceOverviewPage() {
           className="rounded-xl border border-border bg-card/40 p-4"
           aria-label="利润桥"
         >
-          <h2 className="text-sm font-medium">近 7 天利润</h2>
+          <h2 className="text-sm font-medium">
+            演示窗口 {COMMERCE_PERIOD.start} 至 {COMMERCE_PERIOD.end}
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            这是历史样本，不是本周。美国站时区 America/New_York，英国站时区 Europe/London。
+            统计日 {COMMERCE_PERIOD.asOf}。
+          </p>
           <p className="mt-2 text-sm text-muted-foreground">
-            {profit.currency} 本期 {money(profit.current.net_profit)}，上期{' '}
-            {money(profit.previous?.net_profit)}，差额{' '}
-            {money(profit.bridge?.delta_net_profit)}。桥接恒等式{' '}
-            {profit.bridge?.identity_ok ? '成立' : '不成立'}。 销量{' '}
-            {profit.units_sold}。
+            {profit.units_sold === 0
+              ? '数据不足。这个窗口没有可计算的销量。'
+              : `${profit.currency} 本期 ${money(profit.current.net_profit)}，上期 ${money(profit.previous?.net_profit)}，差额 ${money(profit.bridge?.delta_net_profit)}。桥接恒等式 ${profit.bridge?.identity_ok ? '成立' : '不成立'}。 销量 ${profit.units_sold}。`}
           </p>
           <table className="mt-3 w-full text-left text-sm [&_td]:pr-4 [&_th]:pr-4">
             <thead className="text-muted-foreground">

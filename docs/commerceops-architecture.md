@@ -49,8 +49,8 @@ purchase order, or edit a competitor snapshot. The only apply path is
 `approve_and_execute_draft`, and it writes an approval row in the same
 transaction as the operational row.
 
-Phase 2 should not give that apply tool to the model by itself. The model
-creates drafts. A person approves in OpenDot, and OpenDot then calls apply.
+The model creates drafts. It has no approve or execute tool. A person
+approves in OpenDot, and OpenDot then calls `approve_and_execute_draft`.
 The Python gate still refuses a bare execute, so a missed UI check fails
 closed.
 
@@ -172,16 +172,18 @@ available = max(on_hand - reserved, 0)
 average_daily_sales = units ordered in the lookback / lookback_days
 days_of_cover = available / average_daily_sales
 reorder_point = average_daily_sales * planning_lead_time + safety_stock
-need = average_daily_sales * (lead_time + target_cover) + safety_stock - available - inbound
+need = average_daily_sales * (lead_time + target_cover) + safety_stock - available - effective_inbound
 ```
 
 Refunds are not removed from demand. The lookback ends the day before `as_of`.
 Average daily sales of zero yields status `undefined_no_velocity`: days of
 cover and reorder point are null, and the SKU is not marked at risk. A SKU
 with sales and zero available has cover 0 and is at risk. Reserved above
-on-hand is oversold, and available is 0 rather than negative. Inbound quantity
-reduces the need even when its ETA is after the stockout date; that case sets
-`inbound_late`. Suggested units are the ceiling of the need. MOQ is not
+on-hand is oversold, and available is 0 rather than negative. Only inbound
+with an ETA on or before the stockout date offsets the need. A later ETA sets
+`inbound_late` and does not offset. Inbound with no ETA is
+`unknown_eta_inbound_qty` and does not offset. Suggested units are the ceiling
+of the need. MOQ is not
 applied here.
 
 ### supplier.v1
@@ -253,11 +255,14 @@ Draft tools: `commerceops_create_ad_budget_draft`,
 `commerceops_create_purchase_order_draft`,
 `commerceops_create_competitor_response_draft`.
 
-Apply tool: `commerceops_approve_and_execute_draft`.
+The MCP server does not register an approve or execute tool.
+`commerceops_approve_and_execute_draft` is not in the tool list. Approval
+runs only through the signed OpenDot route
+`POST /api/v1/drafts/{id}/approve-and-execute`.
 
 There is no execute tool, no import tool, and no "send purchase order" tool.
 Read tools are marked read-only. Draft tools are not marked destructive.
-The apply tool is. Repeating apply on an executed draft returns the same
+Repeating a signed approval on an executed draft returns the same
 `execution_ref` and writes `replay_noop` instead of a second revision or
 purchase order. A draft whose recomputed decision no longer matches is
 `stale_draft` and is not applied. Rejected drafts stay rejected.

@@ -12,11 +12,13 @@ reorder_point = average_daily_sales * lead_time_days + safety_stock
 
 unconstrained need =
     average_daily_sales * (lead_time_days + target_cover_days) + safety_stock
-    - available - inbound_qty
+    - available - effective_inbound
     floored at 0.
 
-Suggested units are the ceiling of that need. MOQ and order multiple belong
-to the supplier quote, not to this signal.
+effective_inbound is inbound that has an ETA on or before the stockout date.
+Inbound with no ETA, and inbound whose ETA is after the stockout date, do not
+offset pre-stockout demand. MOQ and order multiple belong to the supplier
+quote, not to this signal.
 """
 
 from __future__ import annotations
@@ -55,6 +57,8 @@ class ReplenishmentResult:
     suggested_order_qty: int | None
     status: str
     inbound_qty: int
+    effective_inbound_qty: int
+    unknown_eta_inbound_qty: int
     inbound_late: bool
 
 
@@ -140,6 +144,28 @@ def unconstrained_need(
     return raw if raw > 0 else Decimal(0)
 
 
+def split_inbound(
+    inbound_qty: int,
+    inbound_eta: date | None,
+    stockout_date: date | None,
+) -> tuple[int, int, bool]:
+    """Return effective, unknown-ETA, and late flags.
+
+    Only inbound with an ETA on or before the stockout date offsets demand.
+    A missing ETA is unknown and does not offset. An ETA after the stockout
+    date is late and does not offset. Zero inbound is none of those cases.
+    """
+    require_int("inbound_qty", inbound_qty)
+    if inbound_qty == 0:
+        return 0, 0, False
+    if inbound_eta is None:
+        return 0, inbound_qty, False
+    if stockout_date is None or inbound_eta > stockout_date:
+        late = stockout_date is not None and inbound_eta > stockout_date
+        return 0, 0, late
+    return inbound_qty, 0, False
+
+
 def plan_replenishment(
     *,
     average_daily_sales_value: Decimal,
@@ -153,13 +179,7 @@ def plan_replenishment(
     velocity_status: str,
 ) -> ReplenishmentResult:
     require_int("planning_lead_time_days", planning_lead_time_days, minimum=1)
-    require_int("inbound_qty", inbound_qty)
-    inbound_late = bool(
-        inbound_qty > 0
-        and inbound_eta is not None
-        and stockout_date is not None
-        and inbound_eta > stockout_date
-    )
+    effective, unknown, inbound_late = split_inbound(inbound_qty, inbound_eta, stockout_date)
     if velocity_status != "ok" or average_daily_sales_value == 0:
         return ReplenishmentResult(
             formula_version=FORMULA_VERSION,
@@ -168,6 +188,8 @@ def plan_replenishment(
             suggested_order_qty=None,
             status="insufficient_velocity",
             inbound_qty=inbound_qty,
+            effective_inbound_qty=effective,
+            unknown_eta_inbound_qty=unknown,
             inbound_late=inbound_late,
         )
     reorder = average_daily_sales_value * Decimal(planning_lead_time_days) + Decimal(safety_stock)
@@ -177,7 +199,7 @@ def plan_replenishment(
         target_cover_days,
         safety_stock,
         available,
-        inbound_qty,
+        effective,
     )
     suggested = int(exact.to_integral_value(rounding=ROUND_CEILING))
     return ReplenishmentResult(
@@ -187,5 +209,7 @@ def plan_replenishment(
         suggested_order_qty=suggested,
         status="ok",
         inbound_qty=inbound_qty,
+        effective_inbound_qty=effective,
+        unknown_eta_inbound_qty=unknown,
         inbound_late=inbound_late,
     )

@@ -38,4 +38,4 @@ When you explain a procedure, call `commerceops_search_sops`. Cite `doc_id`, `se
 
 `commerceops_create_ad_budget_draft`, `commerceops_create_purchase_order_draft`, and `commerceops_create_competitor_response_draft` only store drafts.
 
-After a draft is created, stop. Tell the person the draft id, the decision, and that execution waits for approval in CommerceOps. Do not call `commerceops_approve_and_execute_draft`. That tool is reserved for the human approval control. Do not claim a budget, purchase order, or listing change has been applied until an approval result says `status` is `executed`. A `replayed: true` result means the earlier execution still stands and was not repeated.
+After a draft is created, stop. Tell the person the draft id, the decision, and that execution waits for approval on the CommerceOps 经营 page. This server does not provide an approve or execute tool. Do not claim a budget, purchase order, or listing change has been applied until the approval page says the draft status is `executed`. A `replayed: true` result means the earlier execution still stands and was not repeated.

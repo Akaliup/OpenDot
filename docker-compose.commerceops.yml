@@ -1,12 +1,15 @@
-# CommerceOps API only. OpenDot stays on the host and proxies to port 8077.
+# CommerceOps API only. The published port is loopback.
+# OpenDot on the host proxies to 127.0.0.1:8077 with a signed identity.
 services:
   commerceops:
     build:
       context: ./services/commerceops
       dockerfile: Dockerfile
     image: commerceops:local
+    env_file:
+      - .env.commerceops.example
     ports:
-      - '8077:8077'
+      - '127.0.0.1:8077:8077'
     environment:
       COMMERCEOPS_HOST: '0.0.0.0'
       COMMERCEOPS_PORT: '8077'

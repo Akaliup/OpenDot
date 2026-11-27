@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from commerceops.engines.money import D
+from commerceops.context import current_workspace
 from commerceops.errors import CommerceOpsError, ImportValidationError
 from commerceops.models import (
     AdCampaign,
@@ -277,7 +278,9 @@ def _day(row: dict[str, str], field: str, row_number: int, errors: _RowErrors, *
 
 
 def _store(session: Session, code: str) -> Store | None:
-    return session.scalar(select(Store).where(Store.code == code))
+    return session.scalar(
+        select(Store).where(Store.code == code, Store.workspace_id == current_workspace())
+    )
 
 
 def _product(session: Session, store: Store, sku: str) -> Product | None:
@@ -290,6 +293,7 @@ def _ensure_product_stub(session: Session, store: Store, sku: str, unit_cogs: De
         return existing
     product = Product(
         id=f"{store.id}:{sku}",
+        workspace_id=store.workspace_id,
         store_id=store.id,
         sku=sku,
         asin="",
@@ -503,6 +507,7 @@ def _write_order(session: Session, item: dict) -> str:
     identity = f"{store.id}:{item['external_order_id']}:{item['line_id']}"
     existing = session.get(Order, identity)
     values = dict(
+        workspace_id=store.workspace_id,
         store_id=store.id,
         product_id=product.id,
         external_order_id=item["external_order_id"],
@@ -528,6 +533,7 @@ def _write_refund(session: Session, item: dict) -> str:
     identity = f"{store.id}:{item['external_refund_id']}"
     existing = session.get(Refund, identity)
     values = dict(
+        workspace_id=store.workspace_id,
         store_id=store.id,
         product_id=product.id,
         external_refund_id=item["external_refund_id"],
@@ -551,6 +557,7 @@ def _write_ad(session: Session, item: dict) -> str:
     if campaign is None:
         campaign = AdCampaign(
             id=campaign_id,
+            workspace_id=store.workspace_id,
             store_id=store.id,
             product_id=product.id,
             external_id=item["campaign_external_id"],
@@ -568,6 +575,7 @@ def _write_ad(session: Session, item: dict) -> str:
     metric_id = f"{campaign.id}:{item['metric_date'].isoformat()}"
     existing = session.get(AdMetricDay, metric_id)
     values = dict(
+        workspace_id=store.workspace_id,
         campaign_id=campaign.id,
         metric_date=item["metric_date"],
         impressions=item["impressions"],
@@ -587,6 +595,7 @@ def _write_inventory(session: Session, item: dict) -> str:
     identity = f"{product.id}:{item['snapshot_date'].isoformat()}"
     existing = session.get(InventorySnapshot, identity)
     values = dict(
+        workspace_id=store.workspace_id,
         store_id=store.id,
         product_id=product.id,
         snapshot_date=item["snapshot_date"],
@@ -602,10 +611,13 @@ def _write_inventory(session: Session, item: dict) -> str:
 
 
 def _write_quote(session: Session, item: dict) -> str:
-    supplier = session.get(Supplier, item["supplier_code"])
+    supplier = session.scalar(
+        select(Supplier).where(Supplier.code == item["supplier_code"], Supplier.workspace_id == current_workspace())
+    )
     if supplier is None:
         supplier = Supplier(
-            id=item["supplier_code"],
+            id=f"{current_workspace()}:{item['supplier_code']}",
+            workspace_id=current_workspace(),
             code=item["supplier_code"],
             name=item["supplier_name"],
             country=item["supplier_country"],
@@ -617,9 +629,10 @@ def _write_quote(session: Session, item: dict) -> str:
         supplier.name = item["supplier_name"]
         supplier.country = item["supplier_country"]
         supplier.currency = item["currency"]
-    identity = f"{supplier.id}:{item['sku']}:{item['tier_min_qty']}"
+    identity = f"{current_workspace()}:{supplier.id}:{item['sku']}:{item['tier_min_qty']}"
     existing = session.get(SupplierQuote, identity)
     values = dict(
+        workspace_id=current_workspace(),
         supplier_id=supplier.id,
         sku=item["sku"],
         tier_min_qty=item["tier_min_qty"],
@@ -644,6 +657,7 @@ def _write_competitor(session: Session, item: dict) -> str:
     identity = f"{product.id}:{item['competitor_asin']}:{item['captured_at']}"
     existing = session.get(CompetitorSnapshot, identity)
     values = dict(
+        workspace_id=store.workspace_id,
         store_id=store.id,
         product_id=product.id,
         competitor_asin=item["competitor_asin"],

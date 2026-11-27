@@ -12,6 +12,7 @@ from datetime import date
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from commerceops.context import current_workspace
 from commerceops.engines.catalog import FORMULA_VERSIONS
 from commerceops.notify import build_card, dispatch
 from commerceops.models import (
@@ -88,11 +89,16 @@ def generate_weekly_report(
                 }
             )
         competitors = []
-        store_row = session.scalar(select(Store).where(Store.code == code))
+        store_row = session.scalar(
+            select(Store).where(Store.code == code, Store.workspace_id == current_workspace())
+        )
         products = []
         if store_row is not None:
             products = session.scalars(
-                select(Product).where(Product.store_id == store_row.id).order_by(Product.sku)
+                select(Product).where(
+                    Product.workspace_id == current_workspace(),
+                    Product.store_id == store_row.id,
+                ).order_by(Product.sku)
             ).all()
         for product in products:
             diff = competitor_report(session, code, product.sku, as_of)
@@ -285,20 +291,58 @@ def weekly_card(report: dict) -> dict:
 
 
 def _approval_summary(session: Session) -> dict:
+    workspace = current_workspace()
     counts = {"draft": 0, "executed": 0, "rejected": 0}
-    for status in session.scalars(select(ActionDraft.status)).all():
+    for status in session.scalars(
+        select(ActionDraft.status).where(ActionDraft.workspace_id == workspace)
+    ).all():
         counts[status] = counts.get(status, 0) + 1
-    recent = session.scalars(select(WritebackAuditLog).order_by(WritebackAuditLog.id.desc()).limit(8)).all()
-    sent = session.scalar(select(func.coalesce(func.sum(PurchaseOrder.sent_to_supplier), 0)))
+    recent = session.scalars(
+        select(WritebackAuditLog)
+        .where(WritebackAuditLog.workspace_id == workspace)
+        .order_by(WritebackAuditLog.id.desc())
+        .limit(8)
+    ).all()
+    sent = session.scalar(
+        select(func.coalesce(func.sum(PurchaseOrder.sent_to_supplier), 0)).where(
+            PurchaseOrder.workspace_id == workspace
+        )
+    )
     return {
         "pending": counts.get("draft", 0),
         "executed": counts.get("executed", 0),
         "rejected": counts.get("rejected", 0),
-        "audit_rows": int(session.scalar(select(func.count()).select_from(WritebackAuditLog)) or 0),
-        "purchase_orders": int(session.scalar(select(func.count()).select_from(PurchaseOrder)) or 0),
+        "audit_rows": int(
+            session.scalar(
+                select(func.count()).select_from(WritebackAuditLog).where(WritebackAuditLog.workspace_id == workspace)
+            )
+            or 0
+        ),
+        "purchase_orders": int(
+            session.scalar(
+                select(func.count()).select_from(PurchaseOrder).where(PurchaseOrder.workspace_id == workspace)
+            )
+            or 0
+        ),
         "purchase_orders_sent": int(sent or 0),
-        "budget_revisions": int(session.scalar(select(func.count()).select_from(AdBudgetRevision)) or 0),
-        "competitor_responses": int(session.scalar(select(func.count()).select_from(CompetitorResponse)) or 0),
+        "budget_revisions": int(
+            session.scalar(
+                select(func.count())
+                .select_from(AdBudgetRevision)
+                .join(ActionDraft, ActionDraft.id == AdBudgetRevision.draft_id)
+                .where(ActionDraft.workspace_id == workspace)
+            )
+            or 0
+        ),
+        "competitor_responses": int(
+            session.scalar(
+                select(func.count())
+                .select_from(CompetitorResponse)
+                .join(ActionDraft, ActionDraft.id == CompetitorResponse.draft_id)
+                .where(ActionDraft.workspace_id == workspace)
+            )
+            or 0
+        ),
         "recent_events": [
             {
                 "draft_id": row.draft_id,

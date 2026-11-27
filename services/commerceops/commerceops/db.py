@@ -5,13 +5,14 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+from pathlib import Path
+
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
 from commerceops.config import get_settings
-from commerceops.models import Base
 
 _ENGINES: dict[str, Engine] = {}
 _FACTORIES: dict[str, sessionmaker[Session]] = {}
@@ -50,9 +51,20 @@ _IMMUTABLE_SQL = (
 )
 
 
+def _migrate(database_url: str) -> None:
+    from alembic.config import Config
+    from alembic import command
+
+    ini = Path(__file__).resolve().parent / "alembic.ini"
+    cfg = Config(str(ini))
+    cfg.set_main_option("sqlalchemy.url", database_url)
+    command.upgrade(cfg, "head")
+
+
 def init_db(database_url: str) -> Engine:
     if database_url in _ENGINES:
         return _ENGINES[database_url]
+    _migrate(database_url)
     kwargs: dict = {"poolclass": NullPool, "future": True}
     if database_url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
@@ -65,7 +77,6 @@ def init_db(database_url: str) -> Engine:
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
 
-    Base.metadata.create_all(engine)
     with engine.begin() as connection:
         for statement in _IMMUTABLE_SQL:
             connection.execute(text(statement))

@@ -102,7 +102,7 @@ def test_seeded_ads_inventory_suppliers_and_competitors(seeded):
     suppliers = supplier_report(seeded, US_STORE, "NS-CABLE-3PK", AS_OF)
     ranked = suppliers["rank"].rankings
     assert [row.supplier_code for row in ranked] == ["SUP-SZR", "SUP-VNF", "SUP-NBV"]
-    assert [row.adjusted_order_qty for row in ranked] == [200, 240, 300]
+    assert [row.adjusted_order_qty for row in ranked] == [210, 250, 300]
     assert [row.landed_cost for row in ranked] == [Decimal("2.82"), Decimal("2.638"), Decimal("2.502")]
     assert ranked[0].lead_time_risk == "arrives_after_stockout"
     for row in ranked:

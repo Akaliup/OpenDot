@@ -40,7 +40,7 @@ def test_unapproved_execution_fails_closed_and_is_audited(seeded):
     seeded.refresh(campaign)
     assert campaign.daily_budget == original
     with pytest.raises(UnapprovedExecutionError):
-        execute_draft(seeded, created["draft_id"], "analyst")
+        execute_draft(seeded, created["draft_id"], "analyst", authorized=True)
     seeded.refresh(campaign)
     assert campaign.daily_budget == original
     assert seeded.scalar(select(func.count()).select_from(AdBudgetRevision)) == 0
@@ -68,8 +68,8 @@ def test_approved_execution_is_idempotent(seeded):
     )
     assert again["created"] is False
     assert again["draft_id"] == created["draft_id"]
-    first = approve_and_execute_draft(seeded, created["draft_id"], "owner", "cut the exact campaign")
-    second = approve_and_execute_draft(seeded, created["draft_id"], "someone-else", "replay")
+    first = approve_and_execute_draft(seeded, created["draft_id"], "owner", "cut the exact campaign", authorized=True)
+    second = approve_and_execute_draft(seeded, created["draft_id"], "someone-else", "replay", authorized=True)
     campaign = seeded.scalar(select(AdCampaign).where(AdCampaign.external_id == "camp-bottle-exact"))
     assert first["replayed"] is False
     assert second["replayed"] is True
@@ -91,10 +91,10 @@ def test_purchase_order_and_competitor_response_stay_simulated(seeded):
         created_by="buyer",
     )
     assert purchase["decision"]["supplier_code"] == "SUP-SZR"
-    assert purchase["decision"]["quantity"] == 200
+    assert purchase["decision"]["quantity"] == 210
     assert seeded.scalar(select(func.count()).select_from(PurchaseOrder)) == 0
-    approved = approve_and_execute_draft(seeded, purchase["draft_id"], "owner", "buy the ranked quote")
-    approve_and_execute_draft(seeded, purchase["draft_id"], "owner", "again")
+    approved = approve_and_execute_draft(seeded, purchase["draft_id"], "owner", "buy the ranked quote", authorized=True)
+    approve_and_execute_draft(seeded, purchase["draft_id"], "owner", "again", authorized=True)
     orders = seeded.scalars(select(PurchaseOrder)).all()
     assert len(orders) == 1
     assert orders[0].id == approved["execution_ref"]
@@ -114,7 +114,7 @@ def test_purchase_order_and_competitor_response_stay_simulated(seeded):
         created_by="analyst",
     )
     assert any(action["alert"] == "price_drop" for action in response["decision"]["actions"])
-    approve_and_execute_draft(seeded, response["draft_id"], "owner", "review price")
+    approve_and_execute_draft(seeded, response["draft_id"], "owner", "review price", authorized=True)
     assert seeded.scalar(select(func.count()).select_from(CompetitorSnapshot)) == before_snapshots
 
 
@@ -138,9 +138,9 @@ def test_yoga_draft_is_refused_and_rejected_draft_cannot_execute(seeded):
         end=CURRENT_END,
         created_by="analyst",
     )
-    reject_draft(seeded, created["draft_id"], "owner", "not now")
+    reject_draft(seeded, created["draft_id"], "owner", "not now", authorized=True)
     with pytest.raises(CommerceOpsError) as rejected:
-        approve_and_execute_draft(seeded, created["draft_id"], "owner", "too late")
+        approve_and_execute_draft(seeded, created["draft_id"], "owner", "too late", authorized=True)
     assert rejected.value.code == "draft_rejected"
     assert seeded.scalar(select(func.count()).select_from(AdBudgetRevision)) == 0
 
@@ -156,7 +156,7 @@ def test_yoga_draft_is_refused_and_rejected_draft_cannot_execute(seeded):
     campaign.daily_budget = Decimal("80")
     seeded.commit()
     with pytest.raises(CommerceOpsError) as stale:
-        approve_and_execute_draft(seeded, broad["draft_id"], "owner", "stale")
+        approve_and_execute_draft(seeded, broad["draft_id"], "owner", "stale", authorized=True)
     assert stale.value.code == "stale_draft"
     seeded.refresh(campaign)
     assert campaign.daily_budget == Decimal("80")
@@ -172,7 +172,7 @@ def test_audit_log_rejects_updates_and_deletes(seeded):
         supplier_code="SUP-VNF",
         created_by="buyer",
     )
-    assert created["decision"]["quantity"] == 240
+    assert created["decision"]["quantity"] == 250
     with pytest.raises((IntegrityError, DatabaseError)):
         seeded.execute(text("UPDATE writeback_audit_logs SET actor = 'tampered'"))
         seeded.commit()

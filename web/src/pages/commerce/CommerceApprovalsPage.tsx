@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/common/EmptyState';
-import { useAuthStore } from '../../stores/auth';
 import { type AuditEntry, type DraftRow, commerce, errorText } from './api';
 import { useCommerceConnection } from './connection';
 
@@ -29,7 +28,6 @@ function decisionText(draft: DraftRow): string {
 }
 
 export function CommerceApprovalsPage() {
-  const username = useAuthStore((state) => state.user?.username || 'owner');
   const { online, epoch } = useCommerceConnection();
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -77,7 +75,6 @@ export function CommerceApprovalsPage() {
       await commerce(`/api/v1/drafts/${selected}/${kind}`, {
         method: 'POST',
         body: JSON.stringify({
-          approver: username,
           note:
             kind === 'reject'
               ? 'Rejected in CommerceOps'

@@ -17,9 +17,11 @@ class Base(DeclarativeBase):
 
 class Store(Base):
     __tablename__ = "stores"
+    __table_args__ = (UniqueConstraint("workspace_id", "code", name="uq_store_workspace_code"),)
 
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    id: Mapped[str] = mapped_column(String(200), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     marketplace: Mapped[str] = mapped_column(String(64), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
@@ -30,7 +32,8 @@ class Product(Base):
     __tablename__ = "products"
     __table_args__ = (UniqueConstraint("store_id", "sku", name="uq_product_store_sku"),)
 
-    id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    id: Mapped[str] = mapped_column(String(240), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     store_id: Mapped[str] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)
     sku: Mapped[str] = mapped_column(String(64), nullable=False)
     asin: Mapped[str] = mapped_column(String(32), nullable=False, default="")
@@ -48,6 +51,7 @@ class Order(Base):
     )
 
     id: Mapped[str] = mapped_column(String(220), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     store_id: Mapped[str] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
     external_order_id: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -68,6 +72,7 @@ class Refund(Base):
     __table_args__ = (UniqueConstraint("store_id", "external_refund_id", name="uq_refund"),)
 
     id: Mapped[str] = mapped_column(String(200), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     store_id: Mapped[str] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False)
     external_refund_id: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -84,6 +89,7 @@ class AdCampaign(Base):
     __table_args__ = (UniqueConstraint("store_id", "external_id", name="uq_campaign"),)
 
     id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     store_id: Mapped[str] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)
     product_id: Mapped[str | None] = mapped_column(ForeignKey("products.id"), nullable=True)
     external_id: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -97,6 +103,7 @@ class AdMetricDay(Base):
     __table_args__ = (UniqueConstraint("campaign_id", "metric_date", name="uq_ad_metric_day"),)
 
     id: Mapped[str] = mapped_column(String(200), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     campaign_id: Mapped[str] = mapped_column(ForeignKey("ad_campaigns.id"), nullable=False, index=True)
     metric_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     impressions: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -111,6 +118,7 @@ class InventorySnapshot(Base):
     __table_args__ = (UniqueConstraint("product_id", "snapshot_date", name="uq_inventory_snapshot"),)
 
     id: Mapped[str] = mapped_column(String(200), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     store_id: Mapped[str] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
     snapshot_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
@@ -125,9 +133,11 @@ class InventorySnapshot(Base):
 
 class Supplier(Base):
     __tablename__ = "suppliers"
+    __table_args__ = (UniqueConstraint("workspace_id", "code", name="uq_supplier_workspace_code"),)
 
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    id: Mapped[str] = mapped_column(String(200), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     country: Mapped[str] = mapped_column(String(8), nullable=False, default="")
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
@@ -136,10 +146,11 @@ class Supplier(Base):
 class SupplierQuote(Base):
     __tablename__ = "supplier_quotes"
     __table_args__ = (
-        UniqueConstraint("supplier_id", "sku", "tier_min_qty", name="uq_supplier_quote_tier"),
+        UniqueConstraint("workspace_id", "supplier_id", "sku", "tier_min_qty", name="uq_supplier_quote_tier"),
     )
 
-    id: Mapped[str] = mapped_column(String(200), primary_key=True)
+    id: Mapped[str] = mapped_column(String(240), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     supplier_id: Mapped[str] = mapped_column(ForeignKey("suppliers.id"), nullable=False, index=True)
     sku: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     tier_min_qty: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -165,6 +176,7 @@ class CompetitorSnapshot(Base):
     )
 
     id: Mapped[str] = mapped_column(String(240), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     store_id: Mapped[str] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
     competitor_asin: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -206,6 +218,7 @@ class ActionDraft(Base):
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     action_type: Mapped[str] = mapped_column(String(40), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
     idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
@@ -227,6 +240,7 @@ class ApprovalRecord(Base):
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     draft_id: Mapped[str] = mapped_column(ForeignKey("action_drafts.id"), nullable=False, unique=True)
     approver: Mapped[str] = mapped_column(String(120), nullable=False)
     note: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -238,6 +252,7 @@ class WritebackAuditLog(Base):
     __tablename__ = "writeback_audit_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     draft_id: Mapped[str] = mapped_column(ForeignKey("action_drafts.id"), nullable=False, index=True)
     event: Mapped[str] = mapped_column(String(40), nullable=False)
     actor: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -250,6 +265,7 @@ class PurchaseOrder(Base):
     __tablename__ = "purchase_orders"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     draft_id: Mapped[str] = mapped_column(ForeignKey("action_drafts.id"), nullable=False, unique=True)
     store_id: Mapped[str] = mapped_column(ForeignKey("stores.id"), nullable=False)
     supplier_id: Mapped[str] = mapped_column(ForeignKey("suppliers.id"), nullable=False)
@@ -267,6 +283,7 @@ class AdBudgetRevision(Base):
     __tablename__ = "ad_budget_revisions"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     draft_id: Mapped[str] = mapped_column(ForeignKey("action_drafts.id"), nullable=False, unique=True)
     campaign_id: Mapped[str] = mapped_column(ForeignKey("ad_campaigns.id"), nullable=False)
     previous_daily_budget: Mapped[Decimal] = mapped_column(ExactNumeric(), nullable=False)
@@ -278,6 +295,7 @@ class CompetitorResponse(Base):
     __tablename__ = "competitor_responses"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     draft_id: Mapped[str] = mapped_column(ForeignKey("action_drafts.id"), nullable=False, unique=True)
     store_id: Mapped[str] = mapped_column(ForeignKey("stores.id"), nullable=False)
     sku: Mapped[str] = mapped_column(String(64), nullable=False)

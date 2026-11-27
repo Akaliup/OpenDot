@@ -32,6 +32,7 @@ from commerceops.engines.profit import (
 )
 from commerceops.engines.suppliers import FORMULA_VERSION as SUPPLIER_VERSION
 from commerceops.engines.suppliers import SupplierQuoteInput, rank_suppliers
+from commerceops.context import current_workspace
 from commerceops.errors import CommerceOpsError, NoActionRequired, StoreNotFound
 from commerceops.models import (
     AdCampaign,
@@ -51,7 +52,8 @@ _SALES_DEFINITION = "gross_revenue - discounts; refunds are not removed and ad s
 
 
 def list_stores(session: Session) -> dict:
-    stores = session.scalars(select(Store).order_by(Store.code)).all()
+    workspace = current_workspace()
+    stores = session.scalars(select(Store).where(Store.workspace_id == workspace).order_by(Store.code)).all()
     return {
         "stores": [
             {
@@ -121,7 +123,10 @@ def ads_report(session: Session, store_code: str, start: date, end: date, compar
     orders = _orders(session, store.id, start, end)
     total_sales = sum((row.gross_revenue - row.discount for row in orders), Decimal(0))
     campaigns = session.scalars(
-        select(AdCampaign).where(AdCampaign.store_id == store.id).order_by(AdCampaign.external_id)
+        select(AdCampaign).where(
+            AdCampaign.workspace_id == current_workspace(),
+            AdCampaign.store_id == store.id,
+        ).order_by(AdCampaign.external_id)
     ).all()
     campaign_rows = []
     store_impressions = 0
@@ -239,7 +244,9 @@ def inventory_report(
         raise CommerceOpsError("invalid inventory window", code="invalid_period", status_code=422)
     velocity_end = as_of - timedelta(days=1)
     velocity_start = as_of - timedelta(days=lookback_days)
-    products = session.scalars(select(Product).where(Product.store_id == store.id).order_by(Product.sku)).all()
+    products = session.scalars(
+        select(Product).where(Product.workspace_id == current_workspace(), Product.store_id == store.id).order_by(Product.sku)
+    ).all()
     skus = []
     for product in products:
         snapshot = _snapshot(session, product.id, as_of)
@@ -306,7 +313,11 @@ def supplier_report(
     quotes = session.execute(
         select(SupplierQuote, Supplier)
         .join(Supplier, Supplier.id == SupplierQuote.supplier_id)
-        .where(SupplierQuote.sku == sku)
+        .where(
+            SupplierQuote.workspace_id == current_workspace(),
+            Supplier.workspace_id == current_workspace(),
+            SupplierQuote.sku == sku,
+        )
         .order_by(Supplier.code, SupplierQuote.tier_min_qty)
     ).all()
     inputs = [
@@ -331,7 +342,7 @@ def supplier_report(
         inputs,
         average_daily_sales=cover.average_daily_sales,
         available=cover.available,
-        inbound_qty=replenishment.inbound_qty,
+        inbound_qty=replenishment.effective_inbound_qty,
         safety_stock=_safety(session, store_code, sku, as_of),
         target_cover_days=_target(session, store_code, sku, as_of),
         days_of_cover=cover.days_of_cover,
@@ -394,7 +405,11 @@ def competitor_report(session: Session, store_code: str, sku: str, as_of: date) 
     cutoff = f"{as_of.isoformat()}T23:59:59Z"
     rows = session.scalars(
         select(CompetitorSnapshot)
-        .where(CompetitorSnapshot.product_id == product.id, CompetitorSnapshot.captured_at <= cutoff)
+        .where(
+            CompetitorSnapshot.workspace_id == current_workspace(),
+            CompetitorSnapshot.product_id == product.id,
+            CompetitorSnapshot.captured_at <= cutoff,
+        )
         .order_by(CompetitorSnapshot.competitor_asin, CompetitorSnapshot.captured_at)
     ).all()
     grouped: dict[str, list[Snapshot]] = {}
@@ -435,14 +450,22 @@ def competitor_decision(session: Session, store_code: str, sku: str, as_of: date
 
 
 def _store(session: Session, store_code: str) -> Store:
-    store = session.scalar(select(Store).where(Store.code == store_code))
+    store = session.scalar(
+        select(Store).where(Store.code == store_code, Store.workspace_id == current_workspace())
+    )
     if store is None:
         raise StoreNotFound(store_code)
     return store
 
 
 def _product(session: Session, store: Store, sku: str) -> Product:
-    product = session.scalar(select(Product).where(Product.store_id == store.id, Product.sku == sku))
+    product = session.scalar(
+        select(Product).where(
+            Product.workspace_id == current_workspace(),
+            Product.store_id == store.id,
+            Product.sku == sku,
+        )
+    )
     if product is None:
         raise CommerceOpsError(f"sku not found: {sku}", code="sku_not_found", status_code=404)
     return product
@@ -458,7 +481,12 @@ def _window(start: date, end: date) -> None:
 def _orders(session: Session, store_id: str, start: date, end: date) -> list[Order]:
     return list(
         session.scalars(
-            select(Order).where(Order.store_id == store_id, Order.ordered_at >= start, Order.ordered_at <= end)
+            select(Order).where(
+                Order.workspace_id == current_workspace(),
+                Order.store_id == store_id,
+                Order.ordered_at >= start,
+                Order.ordered_at <= end,
+            )
         ).all()
     )
 
@@ -466,7 +494,12 @@ def _orders(session: Session, store_id: str, start: date, end: date) -> list[Ord
 def _refunds(session: Session, store_id: str, start: date, end: date) -> list[Refund]:
     return list(
         session.scalars(
-            select(Refund).where(Refund.store_id == store_id, Refund.refunded_at >= start, Refund.refunded_at <= end)
+            select(Refund).where(
+                Refund.workspace_id == current_workspace(),
+                Refund.store_id == store_id,
+                Refund.refunded_at >= start,
+                Refund.refunded_at <= end,
+            )
         ).all()
     )
 
@@ -491,7 +524,13 @@ def _ad_spend(session: Session, store_id: str, start: date, end: date) -> Decima
     rows = session.execute(
         select(AdMetricDay.spend)
         .join(AdCampaign, AdCampaign.id == AdMetricDay.campaign_id)
-        .where(AdCampaign.store_id == store_id, AdMetricDay.metric_date >= start, AdMetricDay.metric_date <= end)
+        .where(
+            AdCampaign.workspace_id == current_workspace(),
+            AdMetricDay.workspace_id == current_workspace(),
+            AdCampaign.store_id == store_id,
+            AdMetricDay.metric_date >= start,
+            AdMetricDay.metric_date <= end,
+        )
     ).all()
     return sum((spend for (spend,) in rows), Decimal(0))
 
@@ -499,6 +538,7 @@ def _ad_spend(session: Session, store_id: str, start: date, end: date) -> Decima
 def _ad_totals(session: Session, campaign_id: str, start: date, end: date) -> AdTotals | None:
     rows = session.scalars(
         select(AdMetricDay).where(
+            AdMetricDay.workspace_id == current_workspace(),
             AdMetricDay.campaign_id == campaign_id,
             AdMetricDay.metric_date >= start,
             AdMetricDay.metric_date <= end,
@@ -552,14 +592,23 @@ def _sku(session: Session, product_id: str | None) -> str | None:
 def _snapshot(session: Session, product_id: str, as_of: date) -> InventorySnapshot | None:
     return session.scalars(
         select(InventorySnapshot)
-        .where(InventorySnapshot.product_id == product_id, InventorySnapshot.snapshot_date <= as_of)
+        .where(
+            InventorySnapshot.workspace_id == current_workspace(),
+            InventorySnapshot.product_id == product_id,
+            InventorySnapshot.snapshot_date <= as_of,
+        )
         .order_by(InventorySnapshot.snapshot_date.desc())
     ).first()
 
 
 def _units_sold(session: Session, product_id: str, start: date, end: date) -> int:
     rows = session.scalars(
-        select(Order).where(Order.product_id == product_id, Order.ordered_at >= start, Order.ordered_at <= end)
+        select(Order).where(
+            Order.workspace_id == current_workspace(),
+            Order.product_id == product_id,
+            Order.ordered_at >= start,
+            Order.ordered_at <= end,
+        )
     ).all()
     return sum(row.quantity for row in rows)
 
@@ -615,14 +664,29 @@ def price_simulation(
     except (TypeError, ValueError, ArithmeticError) as exc:
         raise CommerceOpsError(str(exc), code="invalid_price", status_code=422) from exc
     orders = session.scalars(
-        select(Order).where(Order.product_id == product.id, Order.ordered_at >= start, Order.ordered_at <= end)
+        select(Order).where(
+            Order.workspace_id == current_workspace(),
+            Order.product_id == product.id,
+            Order.ordered_at >= start,
+            Order.ordered_at <= end,
+        )
     ).all()
     refunds = session.scalars(
-        select(Refund).where(Refund.product_id == product.id, Refund.refunded_at >= start, Refund.refunded_at <= end)
+        select(Refund).where(
+            Refund.workspace_id == current_workspace(),
+            Refund.product_id == product.id,
+            Refund.refunded_at >= start,
+            Refund.refunded_at <= end,
+        )
     ).all()
     ad_spend = Decimal(0)
     attributed = Decimal(0)
-    campaigns = session.scalars(select(AdCampaign).where(AdCampaign.product_id == product.id)).all()
+    campaigns = session.scalars(
+        select(AdCampaign).where(
+            AdCampaign.workspace_id == current_workspace(),
+            AdCampaign.product_id == product.id,
+        )
+    ).all()
     for campaign in campaigns:
         totals = _ad_totals(session, campaign.id, start, end)
         if totals is None:

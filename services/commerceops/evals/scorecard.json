@@ -1,6 +1,6 @@
 {
   "formula_version": "eval.v1",
-  "generated_at": "2026-11-27T06:59:00Z",
+  "generated_at": "2026-11-27T07:52:30Z",
   "period": {
     "start": "2026-03-08",
     "end": "2026-03-14",
@@ -11,6 +11,8 @@
     "passed": 14,
     "failed": 0,
     "ops_minutes_saved": 244,
+    "ops_minutes_saved_basis": "planning_estimate",
+    "ops_minutes_saved_label": "\u89c4\u5212\u4f30\u7b97",
     "measured_model_tokens": 0,
     "estimated_relay_tokens": 5600,
     "token_note": "Measured model tokens are 0 because this bench calls the tools directly. estimated_relay_tokens is a ceiling if a model only copied each tool result."
@@ -191,8 +193,8 @@
         {
           "name": "qty",
           "passed": true,
-          "expected": "200, 240, 300",
-          "actual": "[200, 240, 300]"
+          "expected": "210, 250, 300",
+          "actual": "[210, 250, 300]"
         },
         {
           "name": "landed",
@@ -305,8 +307,8 @@
         {
           "name": "same_ref",
           "passed": true,
-          "expected": "221b6947-104e-4477-b524-c21b66ca731f",
-          "actual": "221b6947-104e-4477-b524-c21b66ca731f"
+          "expected": "a4544856-7cf0-432c-9587-6bbb2b0ecc77",
+          "actual": "a4544856-7cf0-432c-9587-6bbb2b0ecc77"
         },
         {
           "name": "one_revision",
@@ -378,7 +380,7 @@
           "name": "replay",
           "passed": true,
           "expected": "same ref",
-          "actual": "a41a1eee-f4da-4b0d-8e56-b192c54c34e8"
+          "actual": "d875dc7e-babc-4490-bcd9-eaa2a816b9a4"
         },
         {
           "name": "audit_has_create",

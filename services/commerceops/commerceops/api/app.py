@@ -18,6 +18,8 @@ from commerceops.evals.bench import load_latest, run_bench
 from commerceops.notify import notify_anomalies, recent_notifications
 from commerceops.engines.catalog import FORMULA_VERSIONS, FORMULAS
 from commerceops.errors import CommerceOpsError
+from commerceops.context import bind_workspace, reset_workspace
+from commerceops.identity import HEADER, read_identity
 from commerceops.governance import (
     approve_and_execute_draft,
     create_ad_budget_draft,
@@ -108,6 +110,24 @@ def create_app(database_url: str | None = None) -> FastAPI:
     app = FastAPI(title="CommerceOps", version="0.2.0")
     app.state.session_factory = session_factory_for(database_url)
 
+    @app.middleware("http")
+    async def _require_signed_identity(request: Request, call_next):
+        if request.url.path == "/health":
+            return await call_next(request)
+        try:
+            identity = read_identity(request.headers.get(HEADER, ""))
+        except CommerceOpsError as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"error": exc.code, "message": exc.message, "details": exc.details},
+            )
+        token = bind_workspace(identity.workspace_id)
+        request.state.identity = identity
+        try:
+            return await call_next(request)
+        finally:
+            reset_workspace(token)
+
     @app.exception_handler(CommerceOpsError)
     async def _handle_error(_request: Request, exc: CommerceOpsError) -> JSONResponse:
         return JSONResponse(
@@ -125,15 +145,15 @@ def create_app(database_url: str | None = None) -> FastAPI:
     @app.get("/health")
     def health(session: Session = Depends(get_session)) -> dict:
         session.execute(text("SELECT 1"))
-        return {"status": "ok", "service": "commerceops", "formula_versions": FORMULA_VERSIONS}
+        return {"status": "ok", "service": "commerceops"}
 
     @app.get("/api/v1/formulas")
     def formulas() -> dict:
         return {"versions": FORMULA_VERSIONS, "formulas": FORMULAS}
 
     @app.post("/api/v1/seed")
-    def seed(session: Session = Depends(get_session)) -> dict:
-        return seed_demo_data(session)
+    def seed(request: Request, session: Session = Depends(get_session)) -> dict:
+        return seed_demo_data(session, request.state.identity.workspace_id)
 
     @app.post("/api/v1/import/{dataset}")
     async def import_dataset(dataset: str, request: Request) -> dict:
@@ -169,7 +189,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         return to_jsonable(ads_report(session, store_code, start_date, end_date, compare))
 
     @app.post("/api/v1/ads/budget-drafts")
-    def ad_draft(body: AdDraftBody, session: Session = Depends(get_session)) -> dict:
+    def ad_draft(body: AdDraftBody, request: Request, session: Session = Depends(get_session)) -> dict:
         return to_jsonable(
             create_ad_budget_draft(
                 session,
@@ -177,7 +197,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
                 campaign_external_id=body.campaign_external_id,
                 start=body.start_date,
                 end=body.end_date,
-                created_by=body.created_by,
+                created_by=request.state.identity.username,
                 idempotency_key=body.idempotency_key,
             )
         )
@@ -202,7 +222,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         return to_jsonable(supplier_report(session, store_code, sku, as_of))
 
     @app.post("/api/v1/purchase-order-drafts")
-    def purchase_draft(body: PurchaseDraftBody, session: Session = Depends(get_session)) -> dict:
+    def purchase_draft(body: PurchaseDraftBody, request: Request, session: Session = Depends(get_session)) -> dict:
         return to_jsonable(
             create_purchase_order_draft(
                 session,
@@ -210,7 +230,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
                 sku=body.sku,
                 as_of=body.as_of,
                 supplier_code=body.supplier_code,
-                created_by=body.created_by,
+                created_by=request.state.identity.username,
                 idempotency_key=body.idempotency_key,
             )
         )
@@ -225,14 +245,14 @@ def create_app(database_url: str | None = None) -> FastAPI:
         return to_jsonable(competitor_report(session, store_code, sku, as_of))
 
     @app.post("/api/v1/competitor-response-drafts")
-    def competitor_draft(body: CompetitorDraftBody, session: Session = Depends(get_session)) -> dict:
+    def competitor_draft(body: CompetitorDraftBody, request: Request, session: Session = Depends(get_session)) -> dict:
         return to_jsonable(
             create_competitor_response_draft(
                 session,
                 store_code=body.store_code,
                 sku=body.sku,
                 as_of=body.as_of,
-                created_by=body.created_by,
+                created_by=request.state.identity.username,
                 idempotency_key=body.idempotency_key,
             )
         )
@@ -291,16 +311,31 @@ def create_app(database_url: str | None = None) -> FastAPI:
         return to_jsonable(list_audit(session, draft_id))
 
     @app.post("/api/v1/drafts/{draft_id}/execute")
-    def execute(draft_id: str, body: ExecuteBody, session: Session = Depends(get_session)) -> dict:
-        return to_jsonable(execute_draft(session, draft_id, body.actor))
+    def execute(draft_id: str, body: ExecuteBody, request: Request, session: Session = Depends(get_session)) -> dict:
+        identity = request.state.identity
+        return to_jsonable(
+            execute_draft(session, draft_id, identity.username, authorized=identity.can_approve)
+        )
 
     @app.post("/api/v1/drafts/{draft_id}/approve-and-execute")
-    def approve(draft_id: str, body: ApprovalBody, session: Session = Depends(get_session)) -> dict:
-        return to_jsonable(approve_and_execute_draft(session, draft_id, body.approver, body.note))
+    def approve(draft_id: str, body: ApprovalBody, request: Request, session: Session = Depends(get_session)) -> dict:
+        identity = request.state.identity
+        return to_jsonable(
+            approve_and_execute_draft(
+                session,
+                draft_id,
+                identity.username,
+                body.note,
+                authorized=identity.can_approve,
+            )
+        )
 
     @app.post("/api/v1/drafts/{draft_id}/reject")
-    def reject(draft_id: str, body: RejectBody, session: Session = Depends(get_session)) -> dict:
-        return to_jsonable(reject_draft(session, draft_id, body.approver, body.note))
+    def reject(draft_id: str, body: RejectBody, request: Request, session: Session = Depends(get_session)) -> dict:
+        identity = request.state.identity
+        return to_jsonable(
+            reject_draft(session, draft_id, identity.username, body.note, authorized=identity.can_approve)
+        )
 
     return app
 
