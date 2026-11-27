@@ -65,6 +65,26 @@ const BillingPage = lazy(() => import('./pages/BillingPage'));
 const UsagePage = lazy(() =>
   import('./pages/UsagePage').then((m) => ({ default: m.UsagePage })),
 );
+const CommerceLayout = lazy(() =>
+  import('./pages/commerce/CommerceLayout').then((m) => ({
+    default: m.CommerceLayout,
+  })),
+);
+const CommerceOverviewPage = lazy(() =>
+  import('./pages/commerce/CommerceOverviewPage').then((m) => ({
+    default: m.CommerceOverviewPage,
+  })),
+);
+const CommerceApprovalsPage = lazy(() =>
+  import('./pages/commerce/CommerceApprovalsPage').then((m) => ({
+    default: m.CommerceApprovalsPage,
+  })),
+);
+const CommerceEvalPage = lazy(() =>
+  import('./pages/commerce/CommerceEvalPage').then((m) => ({
+    default: m.CommerceEvalPage,
+  })),
+);
 // These four were the only synchronous authed routes left. CapabilitiesPage in
 // particular statically pulls SkillsPage → MarkdownRenderer → KaTeX +
 // highlight.js, which hoisted that whole chain into the entry chunk (~1.74MB
@@ -212,6 +232,18 @@ const appRoutes = createRoutesFromElements(
           </AuthGuard>
         }
       />
+      <Route
+        path="/commerce"
+        element={
+          <Suspense fallback={null}>
+            <CommerceLayout />
+          </Suspense>
+        }
+      >
+        <Route index element={<CommerceOverviewPage />} />
+        <Route path="approvals" element={<CommerceApprovalsPage />} />
+        <Route path="evals" element={<CommerceEvalPage />} />
+      </Route>
       <Route
         path="/usage"
         element={

@@ -69,7 +69,7 @@ export function AdvancedNavigation({ mobile = false }: { mobile?: boolean }) {
             <SheetHeader className="px-0">
               <SheetTitle>高级功能</SheetTitle>
               <SheetDescription>
-                Dot 配置、技能与外部连接、记忆和用量。
+                Dot 配置、经营、技能与外部连接、记忆和用量。
               </SheetDescription>
             </SheetHeader>
             {links}

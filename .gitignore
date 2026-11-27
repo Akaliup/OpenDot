@@ -78,6 +78,17 @@ Thumbs.db
 *.swp
 *.swo
 
+# CommerceOps Python service (local only)
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.py[cod]
+.venv/
+*.egg-info/
+commerceops-notifications.jsonl
+commerceops-evals/
+
 /log/
 nohup.out
 

@@ -83,6 +83,7 @@ import bugReportRoutes from './routes/bug-report.js';
 import channelAccountRoutes, {
   injectChannelAccountDeps,
 } from './routes/channel-accounts.js';
+import commerceopsRoutes from './routes/commerceops.js';
 import {
   checkBillingAccess,
   formatBillingAccessDeniedMessage,
@@ -313,6 +314,7 @@ app.route('/api/usage', usageRoutes);
 app.route('/api/billing', billingRoutes);
 app.route('/api/bug-report', bugReportRoutes);
 app.route('/api/channel-accounts', channelAccountRoutes);
+app.route('/api/commerceops', commerceopsRoutes);
 
 // --- POST /api/messages ---
 
