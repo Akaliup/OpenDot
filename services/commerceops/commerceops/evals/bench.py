@@ -7,6 +7,7 @@ the manual work the tools replace. Measured model tokens are zero.
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 import json
 import os
@@ -28,7 +29,8 @@ from commerceops.governance import (
     reject_draft,
 )
 from commerceops.models import AdBudgetRevision, AdCampaign, PurchaseOrder
-from commerceops.reporting import ads_report, competitor_report, inventory_report, profit_report, supplier_report
+from commerceops.reporting import ads_report, competitor_report, inventory_report, price_simulation, profit_report, supplier_report
+from commerceops.weekly_report import generate_weekly_report
 from commerceops.seed import AS_OF, CURRENT_END, CURRENT_START, UK_STORE, US_STORE, seed_demo_data
 from commerceops.sop.retrieval import search_sops
 
@@ -344,6 +346,191 @@ def case_restart(_session, _url) -> dict:
     return _fresh(work)
 
 
+def case_price_sim(_session, _url) -> dict:
+    def work(session, _url) -> dict:
+        result = price_simulation(session, US_STORE, "NS-BOTTLE-1L", Decimal("18"), CURRENT_START, CURRENT_END)
+        by_name = {item.name: item for item in result["scenarios"]}
+        margin = Decimal("167.9") / Decimal("669.6")
+        assertions = [
+            _check("version", result["formula_version"] == "price_sim.v1", "price_sim.v1", result["formula_version"]),
+            _check("unit_margin", result["new_unit_margin"].value == margin, "167.9/669.6", str(result["new_unit_margin"].value)),
+            _check("profit_delta", result["profit_delta"] == Decimal("-40.81"), "-40.81", str(result["profit_delta"])),
+            _check(
+                "break_even_acos",
+                result["break_even_acos"].value == margin and result["break_even_acos"].status == "ok",
+                "167.9/669.6",
+                str(result["break_even_acos"].value),
+            ),
+            _check("base_units", by_name["base"].units == Decimal("61.6"), "61.6", str(by_name["base"].units)),
+            _check("conservative_delta", by_name["conservative"].profit_delta == Decimal("-30.736"), "-30.736", str(by_name["conservative"].profit_delta)),
+            _check("optimistic_delta", by_name["optimistic"].profit_delta == Decimal("-50.884"), "-50.884", str(by_name["optimistic"].profit_delta)),
+            _check("current_acos", result["current_acos"].value == Decimal("665") / Decimal("525"), "665/525", str(result["current_acos"].value)),
+        ]
+        return _case(
+            "price_sim_bottle_cut",
+            "Bottle price 20 to 18 keeps Decimal unit margin, delta, and elasticities",
+            20,
+            formula=True,
+            policy=False,
+            assertions=assertions,
+        )
+
+    return _fresh(work)
+
+
+def case_price_sim_edges(_session, _url) -> dict:
+    def work(session, _url) -> dict:
+        same = price_simulation(session, US_STORE, "NS-BOTTLE-1L", Decimal("20.00"), CURRENT_START, CURRENT_END)
+        negative = ""
+        try:
+            price_simulation(session, US_STORE, "NS-BOTTLE-1L", Decimal("-1"), CURRENT_START, CURRENT_END)
+        except CommerceOpsError as exc:
+            negative = exc.code
+        missing = ""
+        try:
+            price_simulation(session, US_STORE, "NO-SUCH-SKU", Decimal("10"), CURRENT_START, CURRENT_END)
+        except CommerceOpsError as exc:
+            missing = exc.code
+        quiet = price_simulation(session, US_STORE, "NS-BOTTLE-1L", Decimal("18"), date(2026, 1, 1), date(2026, 1, 2))
+        assertions = [
+            _check(
+                "same_price_delta",
+                all(item.profit_delta == 0 for item in same["scenarios"]),
+                "0",
+                str([item.profit_delta for item in same["scenarios"]]),
+            ),
+            _check(
+                "same_margin",
+                same["new_unit_margin"].value == same["baseline_unit_margin"].value,
+                "unchanged",
+                str(same["new_unit_margin"].value),
+            ),
+            _check("negative_price", negative == "invalid_price", "invalid_price", negative),
+            _check("unknown_sku", missing == "sku_not_found", "sku_not_found", missing),
+            _check("zero_units", quiet["status"] == "zero_units" and quiet["profit_delta"] is None, "zero_units", quiet["status"]),
+        ]
+        return _case(
+            "price_sim_identity_and_edges",
+            "Unchanged price has delta 0 and empty windows do not invent rates",
+            12,
+            formula=True,
+            policy=False,
+            assertions=assertions,
+        )
+
+    return _fresh(work)
+
+
+def _markdown_numbers_are_sourced(report: dict) -> tuple[bool, str]:
+    import re
+
+    source = {key: value for key, value in report.items() if key not in {"markdown", "feishu_card", "notification"}}
+    blob = json.dumps(source, ensure_ascii=False)
+    missing = [token for token in re.findall(r"-?\d+\.\d+", report["markdown"]) if token not in blob]
+    return not missing, str(missing)
+
+
+def case_weekly_report(_session, _url) -> dict:
+    def work(session, _url) -> dict:
+        report = generate_weekly_report(
+            session,
+            start=CURRENT_START,
+            end=CURRENT_END,
+            as_of=AS_OF,
+            push_feishu=False,
+        )
+        markdown = report["markdown"]
+        us = next(store for store in report["stores"] if store["code"] == US_STORE)
+        uk = next(store for store in report["stores"] if store["code"] == UK_STORE)
+        sourced, missing = _markdown_numbers_are_sourced(report)
+        forbidden = ("approximately", "roughly", "estimated", "maybe", "I think", "大约", "大概")
+        leaked = [word for word in forbidden if word.lower() in markdown.lower()]
+        assertions = [
+            _check("us_profit", "682.60" in markdown and "1371.90" in markdown and "-689.30" in markdown, "bridge figures", "present" if "682.60" in markdown else markdown[:80]),
+            _check("uk_flat", uk["profit"]["current_net_profit"] == "126.00" and uk["profit"]["previous_net_profit"] == "126.00" and uk["currency"] == "GBP", "126.00 GBP", uk["profit"]["current_net_profit"]),
+            _check("no_fx_sum", report["currencies_are_not_summed"] is True and "combined" not in markdown.lower(), "separate currencies", "ok"),
+            _check(
+                "ad_cuts",
+                [row["campaign_external_id"] for row in us["ad_cuts"]] == ["camp-bottle-broad", "camp-bottle-exact", "camp-lamp"],
+                "broad, exact, lamp",
+                str([row["campaign_external_id"] for row in us["ad_cuts"]]),
+            ),
+            _check(
+                "stockouts",
+                [row["sku"] for row in us["stockouts"]] == ["NS-CABLE-3PK", "NS-LAMP-LED"],
+                "cable, lamp",
+                str([row["sku"] for row in us["stockouts"]]),
+            ),
+            _check(
+                "supplier",
+                us["stockouts"][0]["suppliers"][0]["supplier_code"] == "SUP-SZR",
+                "SUP-SZR",
+                us["stockouts"][0]["suppliers"][0]["supplier_code"],
+            ),
+            _check(
+                "competitor",
+                "B0COMP001" in markdown and "price_drop" in markdown and "NS-LAMP-LED" in markdown,
+                "lamp competitor alerts",
+                "present" if "B0COMP001" in markdown else "missing",
+            ),
+            _check("sections", all(heading in markdown for heading in ("## Profit bridge", "## Ad cuts", "## Stockouts under 14 days", "## Competitor alerts", "## Approvals")), "five sections", "checked"),
+            _check("sourced", sourced, "every decimal is in the JSON", missing),
+            _check("no_narrative", leaked == [], "no invented wording", str(leaked)),
+            _check("tokens", report["model_tokens"] == 0, "0", str(report["model_tokens"])),
+        ]
+        return _case(
+            "weekly_report_completeness",
+            "Weekly report includes both stores and only sourced figures",
+            25,
+            formula=True,
+            policy=False,
+            assertions=assertions,
+        )
+
+    return _fresh(work)
+
+
+def case_weekly_approval_dry_run(_session, _url) -> dict:
+    def work(session, _url) -> dict:
+        created = create_purchase_order_draft(
+            session,
+            store_code=US_STORE,
+            sku="NS-CABLE-3PK",
+            as_of=AS_OF,
+            supplier_code=None,
+            created_by="eval",
+        )
+        before_orders = session.scalar(select(func.count()).select_from(PurchaseOrder))
+        report = generate_weekly_report(
+            session,
+            start=CURRENT_START,
+            end=CURRENT_END,
+            as_of=AS_OF,
+            push_feishu=True,
+        )
+        after_orders = session.scalar(select(func.count()).select_from(PurchaseOrder))
+        still = get_draft(session, created["draft_id"])
+        assertions = [
+            _check("pending", report["approvals"]["pending"] == 1, "1", str(report["approvals"]["pending"])),
+            _check("not_executed", report["approvals"]["purchase_orders"] == 0, "0", str(report["approvals"]["purchase_orders"])),
+            _check("draft_kept", still["status"] == "draft", "draft", still["status"]),
+            _check("no_write", before_orders == after_orders == 0, "0", str(after_orders)),
+            _check("dry_run", report["notification"]["mode"] == "dry_run", "dry_run", report["notification"]["mode"]),
+            _check("card", report["feishu_card"]["msg_type"] == "interactive", "interactive", report["feishu_card"]["msg_type"]),
+            _check("sent_flag", report["approvals"]["purchase_orders_sent"] == 0, "0", str(report["approvals"]["purchase_orders_sent"])),
+        ]
+        return _case(
+            "weekly_report_approval_dry_run",
+            "Weekly report counts a pending draft and does not write or send",
+            15,
+            formula=False,
+            policy=True,
+            assertions=assertions,
+        )
+
+    return _fresh(work)
+
+
 CASES = (
     case_profit_bridge,
     case_uk_flat,
@@ -355,6 +542,10 @@ CASES = (
     case_replay,
     case_rejected_and_stale,
     case_restart,
+    case_price_sim,
+    case_price_sim_edges,
+    case_weekly_report,
+    case_weekly_approval_dry_run,
 )
 
 

@@ -20,7 +20,8 @@ from commerceops.engines.competitor import FORMULA_VERSION as COMPETITOR_VERSION
 from commerceops.engines.competitor import Snapshot, diff_history
 from commerceops.engines.inventory import FORMULA_VERSION as INVENTORY_VERSION
 from commerceops.engines.inventory import analyze_cover, plan_replenishment
-from commerceops.engines.money import money_str, ratio_str
+from commerceops.engines.money import D, money_str, ratio_str
+from commerceops.engines.price_sim import PriceSimInputs, simulate_price
 from commerceops.engines.profit import (
     FORMULA_VERSION as PROFIT_VERSION,
     OrderLine,
@@ -596,6 +597,89 @@ def _snapshot_input(row: CompetitorSnapshot) -> Snapshot:
         negative_review_hits=row.negative_review_hits,
         negative_keywords=row.negative_keywords,
     )
+
+
+def price_simulation(
+    session: Session,
+    store_code: str,
+    sku: str,
+    target_price: Decimal | str,
+    start: date,
+    end: date,
+) -> dict:
+    store = _store(session, store_code)
+    product = _product(session, store, sku)
+    _window(start, end)
+    try:
+        target = D(target_price)
+    except (TypeError, ValueError, ArithmeticError) as exc:
+        raise CommerceOpsError(str(exc), code="invalid_price", status_code=422) from exc
+    orders = session.scalars(
+        select(Order).where(Order.product_id == product.id, Order.ordered_at >= start, Order.ordered_at <= end)
+    ).all()
+    refunds = session.scalars(
+        select(Refund).where(Refund.product_id == product.id, Refund.refunded_at >= start, Refund.refunded_at <= end)
+    ).all()
+    ad_spend = Decimal(0)
+    attributed = Decimal(0)
+    campaigns = session.scalars(select(AdCampaign).where(AdCampaign.product_id == product.id)).all()
+    for campaign in campaigns:
+        totals = _ad_totals(session, campaign.id, start, end)
+        if totals is None:
+            continue
+        ad_spend += totals.spend
+        attributed += totals.attributed_sales
+    try:
+        result = simulate_price(
+            PriceSimInputs(
+                sku=product.sku,
+                currency=product.currency,
+                current_price=product.list_price,
+                target_price=target,
+                units=sum(row.quantity for row in orders),
+                gross_revenue=sum((row.gross_revenue for row in orders), Decimal(0)),
+                discounts=sum((row.discount for row in orders), Decimal(0)),
+                refunds=sum((row.amount for row in refunds), Decimal(0)),
+                cogs=sum((row.unit_cogs * Decimal(row.quantity) for row in orders), Decimal(0)),
+                recovered_cogs=sum((row.recovered_cogs for row in refunds), Decimal(0)),
+                platform_fees=sum((row.platform_fee for row in orders), Decimal(0)),
+                shipping_fees=sum((row.shipping_fee for row in orders), Decimal(0)),
+                other_fees=sum((row.other_fee for row in orders), Decimal(0)),
+                ad_spend=ad_spend,
+                attributed_sales=attributed,
+            )
+        )
+    except ValueError as exc:
+        raise CommerceOpsError(str(exc), code="invalid_price", status_code=422) from exc
+    return {
+        "formula_version": result.formula_version,
+        "store_code": store.code,
+        "sku": result.sku,
+        "currency": result.currency,
+        "period": {"start": start, "end": end},
+        "status": result.status,
+        "current_price": result.current_price,
+        "target_price": result.target_price,
+        "price_change_ratio": result.price_change_ratio,
+        "scale": result.scale,
+        "baseline_units": result.baseline_units,
+        "baseline_net_sales": result.baseline_net_sales,
+        "baseline_contribution": result.baseline_contribution,
+        "baseline_unit_margin": result.baseline_unit_margin,
+        "baseline_period_profit": result.baseline_period_profit,
+        "new_unit_net_sales": result.new_unit_net_sales,
+        "new_unit_contribution": result.new_unit_contribution,
+        "new_unit_margin": result.new_unit_margin,
+        "break_even_acos": result.break_even_acos,
+        "current_acos": result.current_acos,
+        "acos_headroom": result.acos_headroom,
+        "ad_spend": result.ad_spend,
+        "attributed_sales": result.attributed_sales,
+        "profit_delta": result.profit_delta,
+        "elasticity_note": result.elasticity_note,
+        "scenarios": result.scenarios,
+        "ad_spend_note": "ad spend is the observed window total for this SKU and does not scale with volume",
+    }
 
 
 def _metrics_brief(metrics: AdMetrics) -> dict:

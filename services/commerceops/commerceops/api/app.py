@@ -34,9 +34,12 @@ from commerceops.reporting import (
     competitor_report,
     inventory_report,
     list_stores,
+    price_simulation,
     profit_report,
     supplier_report,
 )
+from commerceops.seed import AS_OF, CURRENT_END, CURRENT_START
+from commerceops.weekly_report import generate_weekly_report
 from commerceops.seed import seed_demo_data
 from commerceops.serialize import to_jsonable
 from commerceops.sop.retrieval import search_sops
@@ -86,8 +89,23 @@ class RejectBody(_Model):
     note: str = ""
 
 
+class PriceSimBody(_Model):
+    store_code: str
+    sku: str
+    target_price: str
+    start_date: date | None = None
+    end_date: date | None = None
+
+
+class WeeklyReportBody(_Model):
+    start_date: date | None = None
+    end_date: date | None = None
+    as_of: date | None = None
+    push_feishu: bool = True
+
+
 def create_app(database_url: str | None = None) -> FastAPI:
-    app = FastAPI(title="CommerceOps", version="0.1.0")
+    app = FastAPI(title="CommerceOps", version="0.2.0")
     app.state.session_factory = session_factory_for(database_url)
 
     @app.exception_handler(CommerceOpsError)
@@ -219,6 +237,22 @@ def create_app(database_url: str | None = None) -> FastAPI:
             )
         )
 
+    @app.post("/api/v1/price-simulations")
+    def price_sim(body: PriceSimBody, session: Session = Depends(get_session)) -> dict:
+        start = body.start_date or CURRENT_START
+        end = body.end_date or CURRENT_END
+        return to_jsonable(price_simulation(session, body.store_code, body.sku, body.target_price, start, end))
+
+    @app.post("/api/v1/reports/weekly")
+    def weekly(body: WeeklyReportBody, session: Session = Depends(get_session)) -> dict:
+        return generate_weekly_report(
+            session,
+            start=body.start_date or CURRENT_START,
+            end=body.end_date or CURRENT_END,
+            as_of=body.as_of or AS_OF,
+            push_feishu=body.push_feishu,
+        )
+
     @app.get("/api/v1/sops/search")
     def sops(q: str = "", limit: int = 5) -> dict:
         try:
@@ -271,13 +305,22 @@ def create_app(database_url: str | None = None) -> FastAPI:
     return app
 
 
+def _auto_seed_enabled() -> bool:
+    return os.environ.get("COMMERCEOPS_AUTO_SEED", "0").strip().lower() in {"1", "true", "yes"}
+
+
 def main() -> None:
     import uvicorn
 
+    if _auto_seed_enabled():
+        from commerceops.bootstrap import seed_if_empty
+
+        seeded = seed_if_empty()
+        print(f"commerceops auto-seed {'wrote demo data' if seeded else 'database already has stores'}", flush=True)
     uvicorn.run(
         "commerceops.api.app:create_app",
         factory=True,
-        host="127.0.0.1",
+        host=os.environ.get("COMMERCEOPS_HOST", "127.0.0.1"),
         port=int(os.environ.get("COMMERCEOPS_PORT", "8077")),
     )
 

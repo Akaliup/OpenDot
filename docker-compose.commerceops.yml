@@ -1,0 +1,35 @@
+# CommerceOps API only. OpenDot stays on the host and proxies to port 8077.
+services:
+  commerceops:
+    build:
+      context: ./services/commerceops
+      dockerfile: Dockerfile
+    image: commerceops:local
+    ports:
+      - '8077:8077'
+    environment:
+      COMMERCEOPS_HOST: '0.0.0.0'
+      COMMERCEOPS_PORT: '8077'
+      COMMERCEOPS_AUTO_SEED: '1'
+      COMMERCEOPS_DATABASE_URL: 'sqlite:////data/commerceops.db'
+      COMMERCEOPS_NOTIFY_LOG: '/data/notifications.jsonl'
+      COMMERCEOPS_EVAL_DIR: '/data/evals'
+      FEISHU_WEBHOOK_URL: '${FEISHU_WEBHOOK_URL:-}'
+    volumes:
+      - commerceops-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8077/health', timeout=2).read()",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  commerceops-data:

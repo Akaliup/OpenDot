@@ -18,9 +18,30 @@ python3 -m venv .venv
 .venv/bin/commerceops-api
 ```
 
-The API listens on `127.0.0.1:8077`. Override the port with `COMMERCEOPS_PORT`
-and the database with `COMMERCEOPS_DATABASE_URL` (default
-`sqlite:///./commerceops.db`). Seed is idempotent.
+The API listens on `127.0.0.1:8077`. Override the host with `COMMERCEOPS_HOST`,
+the port with `COMMERCEOPS_PORT`, and the database with
+`COMMERCEOPS_DATABASE_URL` (default `sqlite:///./commerceops.db`). Seed is
+idempotent and does not delete drafts.
+
+From the repository root, the same process is:
+
+```bash
+./scripts/start-commerceops.sh
+```
+
+Docker, from the repository root:
+
+```bash
+docker compose -f docker-compose.commerceops.yml up --build
+```
+
+The image listens on `0.0.0.0:8077`, seeds the demo database when the volume
+is empty, and exposes `/health`. Copy `.env.commerceops.example` if you want
+to override the compose environment. Leave `FEISHU_WEBHOOK_URL` unset for a
+dry-run card.
+
+OpenDot proxies `/api/commerceops` to `COMMERCEOPS_API_URL` (default
+`http://127.0.0.1:8077`).
 
 The MCP server speaks stdio, which is the transport OpenDot already registers:
 

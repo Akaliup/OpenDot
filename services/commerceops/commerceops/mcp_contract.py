@@ -8,6 +8,8 @@ READ_TOOLS = (
     "commerceops_supplier_comparison",
     "commerceops_competitor_diff",
     "commerceops_search_sops",
+    "simulate_price_change",
+    "generate_weekly_report",
 )
 
 DRAFT_TOOLS = (

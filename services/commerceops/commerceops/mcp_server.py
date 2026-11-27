@@ -28,9 +28,12 @@ from commerceops.reporting import (
     competitor_report,
     inventory_report,
     list_stores,
+    price_simulation,
     profit_report,
     supplier_report,
 )
+from commerceops.seed import AS_OF, CURRENT_END, CURRENT_START
+from commerceops.weekly_report import generate_weekly_report
 from commerceops.serialize import to_jsonable
 from commerceops.sop.retrieval import search_sops
 
@@ -40,6 +43,12 @@ _DRAFT = ToolAnnotations(
     destructiveHint=False,
     idempotentHint=True,
     openWorldHint=False,
+)
+_REPORT = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=True,
 )
 _APPROVE = ToolAnnotations(
     readOnlyHint=False,
@@ -51,9 +60,10 @@ _APPROVE = ToolAnnotations(
 mcp = MCPServer(
     name="commerceops",
     instructions=(
-        "CommerceOps profit, ads, inventory, supplier, and competitor figures come only from these tools. "
+        "CommerceOps profit, ads, inventory, supplier, competitor, price simulation, and weekly report figures come only from these tools. "
         "Search SOPs when you need a procedure, and quote the returned citation. "
-        "create_* tools store drafts and do not change budgets, purchase orders, or listings. "
+        "simulate_price_change and generate_weekly_report do not change budgets, purchase orders, or listings. "
+        "create_* tools store drafts and do not change those records either. "
         "commerceops_approve_and_execute_draft records a human approval and applies one draft. "
         "Call it only after a person has approved. Never invent a money figure."
     ),
@@ -131,6 +141,38 @@ def commerceops_competitor_diff(store_code: str, sku: str, as_of: str) -> str:
 def commerceops_search_sops(query: str, limit: int = 5) -> str:
     """Search SOP markdown and return doc_id, section, and an exact quote."""
     return _guard(lambda: search_sops(query, limit))
+
+
+@mcp.tool(name="simulate_price_change", annotations=_READ, structured_output=False)
+def simulate_price_change(
+    store_code: str,
+    sku: str,
+    target_price: str,
+    start_date: str = "",
+    end_date: str = "",
+) -> str:
+    """Simulate a list-price change. Returns unit margin, profit delta, break-even ACOS, and elasticity scenarios. Does not write."""
+    start = _day(start_date) if start_date else CURRENT_START
+    end = _day(end_date) if end_date else CURRENT_END
+    with session_scope() as session:
+        return _guard(lambda: price_simulation(session, store_code, sku, target_price, start, end))
+
+
+@mcp.tool(name="generate_weekly_report", annotations=_REPORT, structured_output=False)
+def generate_weekly_report_tool(
+    start_date: str = "",
+    end_date: str = "",
+    as_of: str = "",
+    push_feishu: bool = False,
+) -> str:
+    """Assemble the weekly report from engine output. Does not create drafts. push_feishu sends only when a webhook is set."""
+    start = _day(start_date) if start_date else CURRENT_START
+    end = _day(end_date) if end_date else CURRENT_END
+    day = _day(as_of) if as_of else AS_OF
+    with session_scope() as session:
+        return _guard(
+            lambda: generate_weekly_report(session, start=start, end=end, as_of=day, push_feishu=push_feishu)
+        )
 
 
 @mcp.tool(name="commerceops_create_ad_budget_draft", annotations=_DRAFT, structured_output=False)

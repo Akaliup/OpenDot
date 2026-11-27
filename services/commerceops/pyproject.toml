@@ -1,6 +1,6 @@
 [project]
 name = "commerceops"
-version = "0.1.0"
+version = "0.2.0"
 description = "Deterministic cross-border commerce engines, SOP citations, and approval-gated writebacks for OpenDot."
 readme = "README.md"
 requires-python = ">=3.11"

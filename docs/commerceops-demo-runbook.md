@@ -42,8 +42,10 @@ The CommerceOps skill is already a project skill at `container/skills/commerceop
 1. Overview, store `us-main`. The current net profit is 682.60 and the previous is 1371.90. The bridge is -689.30, and ad spend plus refunds are the two largest drags. Point at the identity flag.
 2. Show Bottle Exact and Bottle Broad as the high-ACOS rows, then `NS-CABLE-3PK` with Shenzhen Rapid as the first supplier quote. Show competitor `B0COMP001` with the price drop, BSR jump, and complaint spike, labeled as demo seed data.
 3. Click 飞书简报. With no webhook, the API records a dry-run card. Say that a real webhook URL would send the same card.
-4. Switch to 审批. If a draft is pending, read the exact budget or quantity. Click 批准并执行 once. The audit gains `approved` and `executed`. Click the same action again. The status stays executed and the audit gains `replay_noop`. No second purchase order or budget revision is written.
-5. Open 评测 and run it. The scorecard should be 10/10, with measured model tokens at 0.
+4. Switch to 审批. If a draft is pending, read the exact budget or quantity. Click 批准并执行 once. The audit gains `approved` and `executed`. The button becomes 再次批准. Click it. The status stays executed and the audit gains `replay_noop`. No second purchase order or budget revision is written.
+5. On 概览, leave the bottle SKU and target price `18.00`, then click 计算价格. The base profit delta is -40.81. The three rows are conservative, base, and optimistic.
+6. Click 生成周报 / 推送飞书. With no webhook, the card mode is `dry_run`. The markdown contains both stores and does not add USD to GBP.
+7. Open 评测 and run it. The scorecard should be 14/14, with measured model tokens at 0.
 
 ## Restart in the middle of an approval
 

@@ -1,9 +1,9 @@
 ---
 name: CommerceOps
-description: Cross-border store analysis. Use CommerceOps tools for profit, ads, inventory, suppliers, competitors, and SOP citations. Never invent figures. Stop at drafts for human approval.
+description: Cross-border store analysis. Use CommerceOps tools for profit, ads, inventory, suppliers, competitors, price simulation, weekly reports, and SOP citations. Never invent figures. Stop at drafts for human approval.
 user-invocable: true
-argument-hint: "[store code] [question]"
-allowed-tools: commerceops_list_stores,commerceops_profit_report,commerceops_ads_diagnosis,commerceops_inventory_risk,commerceops_supplier_comparison,commerceops_competitor_diff,commerceops_search_sops,commerceops_create_ad_budget_draft,commerceops_create_purchase_order_draft,commerceops_create_competitor_response_draft
+argument-hint: '[store code] [question]'
+allowed-tools: commerceops_list_stores,commerceops_profit_report,commerceops_ads_diagnosis,commerceops_inventory_risk,commerceops_supplier_comparison,commerceops_competitor_diff,commerceops_search_sops,simulate_price_change,generate_weekly_report,commerceops_create_ad_budget_draft,commerceops_create_purchase_order_draft,commerceops_create_competitor_response_draft
 ---
 
 # CommerceOps
@@ -21,8 +21,14 @@ Before you state a profit, margin, ACOS, ROAS, TACOS, CTR, CVR, days of cover, r
 - Cover, reorder point, and suggested units: `commerceops_inventory_risk`
 - Supplier rank, MOQ, and lead-time risk: `commerceops_supplier_comparison`
 - Price, BSR, rating, and complaint diffs: `commerceops_competitor_diff`
+- A target list price, the new unit margin, profit delta, break-even ACOS, and the three elasticity scenarios: `simulate_price_change`
+- The weekly profit bridge, ad cuts, stockouts, supplier ranks, competitor alerts, and approval counts: `generate_weekly_report`
 
-If a value is null, say the status (`zero_net_sales`, `zero_attributed_sales`, `undefined_no_velocity`, and the others). Do not replace it with zero or with an estimate. Do not add ad spend twice. Order lines do not contain it.
+If a value is null, say the status (`zero_net_sales`, `zero_attributed_sales`, `undefined_no_velocity`, `zero_units`, `negative_unit_margin`, and the others). Do not replace it with zero or with an estimate. Do not add ad spend twice. Order lines do not contain it.
+
+`simulate_price_change` keeps ad spend at the observed window total. Quote its `elasticity_note` when you explain conservative, base, and optimistic. Optimistic means demand is less elastic.
+
+`generate_weekly_report` copies engine output into JSON, Markdown, and a Feishu card. It does not create a draft. Pass `push_feishu` true only when the person asked to push. Without `FEISHU_WEBHOOK_URL` the card mode is `dry_run`. Do not add a combined total across currencies.
 
 ## SOP citations
 

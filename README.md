@@ -246,6 +246,35 @@ npm run desktop:package
 
 不要把 API Key、Session Cookie 或其他凭证写入命令行历史、截图或提交到仓库。远程部署时使用 HTTPS/WSS，并为反向代理、Cookie 和访问控制配置独立的安全边界。
 
+## CommerceOps AI
+
+CommerceOps 是挂在 OpenDot 上的跨境经营切片：Python 确定性引擎负责利润、广告、库存、供应商、竞品、价格模拟和周报，OpenDot 负责登录、页面、Skill 和人工批准。预算、采购和竞品动作先成为草案，批准后才写入，重复批准不会再写一笔。
+
+本地直接启动：
+
+```bash
+./scripts/start-commerceops.sh
+```
+
+Docker：
+
+```bash
+docker compose -f docker-compose.commerceops.yml up --build
+```
+
+然后在仓库根目录让 OpenDot 指向该服务：
+
+```bash
+export COMMERCEOPS_API_URL="http://127.0.0.1:8077"
+npm run dev
+npm run dev:web
+```
+
+登录后打开高级功能里的经营。架构、公式和三分钟演示见
+[CommerceOps 架构](docs/commerceops-architecture.md)、
+[演示脚本](docs/commerceops-demo-runbook.md) 和
+[最终交付说明](docs/commerceops-final-delivery.md)。
+
 ## 执行与安全边界
 
 - Backend 由 Node.js 运行，负责认证、API、WebSocket、队列、调度、渠道连接、Provider、用量和 SQLite 持久化。

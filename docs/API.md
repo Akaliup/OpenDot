@@ -51,7 +51,7 @@
 
 ## CommerceOps 代理
 
-`/api/commerceops/*` 需要登录 Cookie。`GET /api/commerceops/meta` 由 OpenDot 自己返回 MCP 注册示例和 Skill 路径。其余路径去掉 `/api/commerceops` 前缀后转发到 `COMMERCEOPS_API_URL`（默认 `http://127.0.0.1:8077`）。Python 服务未启动时返回 503，`code` 为 `commerceops_offline`。这个代理不写入 OpenDot 的 MCP 配置；`services/commerceops/opendot/mcp-server.example.json` 是可选的 stdio 注册示例。
+`/api/commerceops/*` 需要登录 Cookie。`GET /api/commerceops/meta` 由 OpenDot 自己返回 MCP 注册示例和 Skill 路径。其余路径去掉 `/api/commerceops` 前缀后转发到 `COMMERCEOPS_API_URL`（默认 `http://127.0.0.1:8077`），包括 `POST /api/v1/price-simulations` 和 `POST /api/v1/reports/weekly`。Python 服务未启动时返回 503，`code` 为 `commerceops_offline`。这个代理不写入 OpenDot 的 MCP 配置；`services/commerceops/opendot/mcp-server.example.json` 是可选的 stdio 注册示例。
 
 ## 认证
 

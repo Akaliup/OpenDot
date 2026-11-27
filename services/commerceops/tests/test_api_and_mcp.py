@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 
 from commerceops.mcp_contract import ALL_TOOLS, FORBIDDEN_TOOLS
 from commerceops.mcp_server import mcp
+from commerceops.db import session_factory_for
 from commerceops.models import AdCampaign, PurchaseOrder
 from commerceops.seed import AS_OF, CURRENT_END, CURRENT_START, US_STORE, seed_demo_data
 
@@ -128,6 +129,65 @@ def test_mcp_tool_surface_and_in_process_writeback(seeded, database_url, monkeyp
     assert replayed["execution_ref"] == approved["execution_ref"]
     campaign = seeded.scalar(select(AdCampaign).where(AdCampaign.external_id == "camp-bottle-exact"))
     assert campaign.daily_budget == Decimal("45")
+
+
+def test_mcp_stdio_price_sim_and_weekly_report(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path}/stdio.db"
+    session = session_factory_for(database_url)()
+    try:
+        seed_demo_data(session)
+    finally:
+        session.close()
+    monkeypatch.delenv("FEISHU_WEBHOOK_URL", raising=False)
+
+    async def _stdio():
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "commerceops.mcp_server"],
+            env={
+                "COMMERCEOPS_DATABASE_URL": database_url,
+                "COMMERCEOPS_NOTIFY_LOG": str(tmp_path / "notify.jsonl"),
+            },
+        )
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write) as mcp_session:
+                await mcp_session.initialize()
+                listed = await mcp_session.list_tools()
+                names = {tool.name for tool in listed.tools}
+                assert "simulate_price_change" in names
+                assert "generate_weekly_report" in names
+                simulated = json.loads(
+                    _tool_text(
+                        await mcp_session.call_tool(
+                            "simulate_price_change",
+                            {
+                                "store_code": US_STORE,
+                                "sku": "NS-BOTTLE-1L",
+                                "target_price": "18.00",
+                                "start_date": CURRENT_START.isoformat(),
+                                "end_date": CURRENT_END.isoformat(),
+                            },
+                        )
+                    )
+                )
+                weekly = json.loads(
+                    _tool_text(
+                        await mcp_session.call_tool(
+                            "generate_weekly_report",
+                            {"push_feishu": True, "as_of": AS_OF.isoformat()},
+                        )
+                    )
+                )
+                return simulated, weekly
+
+    simulated, weekly = asyncio.run(_stdio())
+    assert simulated["formula_version"] == "price_sim.v1"
+    assert Decimal(simulated["profit_delta"]) == Decimal("-40.81")
+    assert [row["name"] for row in simulated["scenarios"]] == ["conservative", "base", "optimistic"]
+    assert "682.60" in weekly["markdown"]
+    assert weekly["notification"]["mode"] == "dry_run"
+    assert weekly["approvals"]["purchase_orders"] == 0
+    assert weekly["model_tokens"] == 0
 
 
 def test_mcp_stdio_lists_tools_and_returns_a_citation():
