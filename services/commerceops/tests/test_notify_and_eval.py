@@ -1,6 +1,6 @@
 import json
 
-from commerceops.evals.bench import load_latest, run_bench
+from commerceops.evals.bench import CASES, load_latest, run_bench
 from commerceops.notify import build_card, clear_notifications, dispatch, recent_notifications
 
 
@@ -44,13 +44,17 @@ def test_eval_bench_scorecard_passes(tmp_path, monkeypatch):
     monkeypatch.delenv("FEISHU_WEBHOOK_URL", raising=False)
     monkeypatch.setenv("COMMERCEOPS_EVAL_DIR", str(tmp_path))
     scorecard = run_bench(tmp_path)
-    assert scorecard["summary"]["cases"] == 10
+    assert len(CASES) >= 12
+    assert scorecard["summary"]["cases"] == len(CASES)
     assert scorecard["summary"]["failed"] == 0
-    assert scorecard["summary"]["passed"] == 10
+    assert scorecard["summary"]["passed"] == len(CASES)
     assert scorecard["summary"]["measured_model_tokens"] == 0
     assert scorecard["summary"]["ops_minutes_saved"] > 0
+    raw = (tmp_path / "scorecard.json").read_text(encoding="utf-8")
+    assert "profit_bridge_us" in raw
+    assert "price_sim_bottle_cut" in raw
+    assert "weekly_report_completeness" in raw
     html = (tmp_path / "scorecard.html").read_text(encoding="utf-8")
-    assert "profit_bridge_us" in (tmp_path / "scorecard.json").read_text(encoding="utf-8")
-    assert html.count("<span class='pass'>") == 10
+    assert html.count("<span class='pass'>") == len(CASES)
     latest = load_latest(tmp_path)
     assert latest["summary"]["failed"] == 0

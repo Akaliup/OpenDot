@@ -1,0 +1,628 @@
+{
+  "formula_version": "eval.v1",
+  "generated_at": "2026-11-27T07:52:30Z",
+  "period": {
+    "start": "2026-03-08",
+    "end": "2026-03-14",
+    "as_of": "2026-03-15"
+  },
+  "summary": {
+    "cases": 14,
+    "passed": 14,
+    "failed": 0,
+    "ops_minutes_saved": 244,
+    "ops_minutes_saved_basis": "planning_estimate",
+    "ops_minutes_saved_label": "\u89c4\u5212\u4f30\u7b97",
+    "measured_model_tokens": 0,
+    "estimated_relay_tokens": 5600,
+    "token_note": "Measured model tokens are 0 because this bench calls the tools directly. estimated_relay_tokens is a ceiling if a model only copied each tool result."
+  },
+  "cases": [
+    {
+      "id": "profit_bridge_us",
+      "title": "US profit bridge is -689.30",
+      "passed": true,
+      "formula_check": true,
+      "policy_guard": false,
+      "ops_minutes_saved": 25,
+      "estimated_relay_tokens": 400,
+      "measured_model_tokens": 0,
+      "assertions": [
+        {
+          "name": "current_net_profit",
+          "passed": true,
+          "expected": "682.60",
+          "actual": "682.60"
+        },
+        {
+          "name": "previous_net_profit",
+          "passed": true,
+          "expected": "1371.90",
+          "actual": "1371.90"
+        },
+        {
+          "name": "delta",
+          "passed": true,
+          "expected": "-689.30",
+          "actual": "-689.30"
+        },
+        {
+          "name": "components",
+          "passed": true,
+          "expected": "revenue=-70, discounts=14, refunds=-300, net_cogs=41.20, platform_fees=10.50, shipping_fees=7, ad_spend=-392, other_fees=0",
+          "actual": "revenue=-70.00, discounts=14.00, refunds=-300.00, net_cogs=41.20, platform_fees=10.50, shipping_fees=7.00, ad_spend=-392.00, other_fees=0"
+        },
+        {
+          "name": "identity",
+          "passed": true,
+          "expected": "-689.30",
+          "actual": "-689.30"
+        }
+      ]
+    },
+    {
+      "id": "profit_uk_flat",
+      "title": "UK profit stays flat",
+      "passed": true,
+      "formula_check": true,
+      "policy_guard": false,
+      "ops_minutes_saved": 8,
+      "estimated_relay_tokens": 400,
+      "measured_model_tokens": 0,
+      "assertions": [
+        {
+          "name": "currency",
+          "passed": true,
+          "expected": "GBP",
+          "actual": "GBP"
+        },
+        {
+          "name": "flat",
+          "passed": true,
+          "expected": "126",
+          "actual": "126.00"
+        }
+      ]
+    },
+    {
+      "id": "ads_anomaly_and_unapproved_guard",
+      "title": "High ACOS detection and unapproved execute fails closed",
+      "passed": true,
+      "formula_check": true,
+      "policy_guard": true,
+      "ops_minutes_saved": 30,
+      "estimated_relay_tokens": 400,
+      "measured_model_tokens": 0,
+      "assertions": [
+        {
+          "name": "exact_acos",
+          "passed": true,
+          "expected": "0.75",
+          "actual": "0.75"
+        },
+        {
+          "name": "exact_cut",
+          "passed": true,
+          "expected": "31.50",
+          "actual": "31.50"
+        },
+        {
+          "name": "broad_severe",
+          "passed": true,
+          "expected": "severe_acos",
+          "actual": "severe_acos"
+        },
+        {
+          "name": "yoga_refused",
+          "passed": true,
+          "expected": "no draft",
+          "actual": "True"
+        },
+        {
+          "name": "budget_unchanged",
+          "passed": true,
+          "expected": "45.00",
+          "actual": "45.00"
+        },
+        {
+          "name": "http_409",
+          "passed": true,
+          "expected": "409",
+          "actual": "409"
+        },
+        {
+          "name": "audit_rejection",
+          "passed": true,
+          "expected": "unapproved",
+          "actual": "['draft_created', 'execution_rejected']"
+        }
+      ]
+    },
+    {
+      "id": "stockout_14d",
+      "title": "SKUs inside a 14-day cover horizon",
+      "passed": true,
+      "formula_check": true,
+      "policy_guard": false,
+      "ops_minutes_saved": 20,
+      "estimated_relay_tokens": 400,
+      "measured_model_tokens": 0,
+      "assertions": [
+        {
+          "name": "at_risk",
+          "passed": true,
+          "expected": "cable, lamp",
+          "actual": "['NS-CABLE-3PK', 'NS-LAMP-LED']"
+        },
+        {
+          "name": "cover",
+          "passed": true,
+          "expected": "3.6",
+          "actual": "3.6"
+        },
+        {
+          "name": "reorder",
+          "passed": true,
+          "expected": "75",
+          "actual": "75"
+        },
+        {
+          "name": "within_14",
+          "passed": true,
+          "expected": "<= 14",
+          "actual": "3.6"
+        }
+      ]
+    },
+    {
+      "id": "supplier_rank",
+      "title": "Cable supplier ranking and MOQ quantity",
+      "passed": true,
+      "formula_check": true,
+      "policy_guard": false,
+      "ops_minutes_saved": 25,
+      "estimated_relay_tokens": 400,
+      "measured_model_tokens": 0,
+      "assertions": [
+        {
+          "name": "order",
+          "passed": true,
+          "expected": "SZR, VNF, NBV",
+          "actual": "['SUP-SZR', 'SUP-VNF', 'SUP-NBV']"
+        },
+        {
+          "name": "qty",
+          "passed": true,
+          "expected": "210, 250, 300",
+          "actual": "[210, 250, 300]"
+        },
+        {
+          "name": "landed",
+          "passed": true,
+          "expected": "2.82",
+          "actual": "2.8200"
+        },
+        {
+          "name": "weights",
+          "passed": true,
+          "expected": "score equals weights",
+          "actual": "checked"
+        }
+      ]
+    },
+    {
+      "id": "competitor_diff",
+      "title": "Competitor price drop, BSR jump, and complaint spike",
+      "passed": true,
+      "formula_check": true,
+      "policy_guard": false,
+      "ops_minutes_saved": 15,
+      "estimated_relay_tokens": 400,
+      "measured_model_tokens": 0,
+      "assertions": [
+        {
+          "name": "sample",
+          "passed": true,
+          "expected": "true",
+          "actual": "True"
+        },
+        {
+          "name": "price_bsr_complaints",
+          "passed": true,
+          "expected": "three alerts",
+          "actual": "['price_drop', 'bsr_jump', 'complaint_spike']"
+        },
+        {
+          "name": "rating",
+          "passed": true,
+          "expected": "rating_drop",
+          "actual": "['rating_drop']"
+        },
+        {
+          "name": "source",
+          "passed": true,
+          "expected": "demo_seed",
+          "actual": "demo_seed"
+        }
+      ]
+    },
+    {
+      "id": "sop_citations",
+      "title": "English and Chinese SOP citations",
+      "passed": true,
+      "formula_check": true,
+      "policy_guard": false,
+      "ops_minutes_saved": 10,
+      "estimated_relay_tokens": 400,
+      "measured_model_tokens": 0,
+      "assertions": [
+        {
+          "name": "english_doc",
+          "passed": true,
+          "expected": "sop-acos-optimization",
+          "actual": "sop-acos-optimization"
+        },
+        {
+          "name": "english_quote",
+          "passed": true,
+          "expected": "quote contains control code",
+          "actual": "Record control code acossevere and cut the daily budget in half when ACOS is at least 0.80."
+        },
+        {
+          "name": "chinese_doc",
+          "passed": true,
+          "expected": "sop-profit-drop",
+          "actual": "sop-profit-drop"
+        },
+        {
+          "name": "chinese_section",
+          "passed": true,
+          "expected": "Refund Spike Check",
+          "actual": "Refund Spike Check"
+        }
+      ]
+    },
+    {
+      "id": "approval_replay",
+      "title": "Duplicate approval does not write twice",
+      "passed": true,
+      "formula_check": false,
+      "policy_guard": true,
+      "ops_minutes_saved": 12,
+      "estimated_relay_tokens": 400,
+      "measured_model_tokens": 0,
+      "assertions": [
+        {
+          "name": "first",
+          "passed": true,
+          "expected": "false",
+          "actual": "False"
+        },
+        {
+          "name": "second",
+          "passed": true,
+          "expected": "true",
+          "actual": "True"
+        },
+        {
+          "name": "same_ref",
+          "passed": true,
+          "expected": "a4544856-7cf0-432c-9587-6bbb2b0ecc77",
+          "actual": "a4544856-7cf0-432c-9587-6bbb2b0ecc77"
+        },
+        {
+          "name": "one_revision",
+          "passed": true,
+          "expected": "1",
+          "actual": "1"
+        }
+      ]
+    },
+    {
+      "id": "rejected_and_stale",
+      "title": "Rejected and stale drafts do not write",
+      "passed": true,
+      "formula_check": false,
+      "policy_guard": true,
+      "ops_minutes_saved": 12,
+      "estimated_relay_tokens": 400,
+      "measured_model_tokens": 0,
+      "assertions": [
+        {
+          "name": "rejected",
+          "passed": true,
+          "expected": "draft_rejected",
+          "actual": "draft_rejected"
+        },
+        {
+          "name": "stale",
+          "passed": true,
+          "expected": "stale_draft",
+          "actual": "stale_draft"
+        },
+        {
+          "name": "no_revision",
+          "passed": true,
+          "expected": "0",
+          "actual": "0"
+        }
+      ]
+    },
+    {
+      "id": "restart_pending_draft",
+      "title": "A pending draft survives a new session and still writes once",
+      "passed": true,
+      "formula_check": false,
+      "policy_guard": true,
+      "ops_minutes_saved": 15,
+      "estimated_relay_tokens": 400,
+      "measured_model_tokens": 0,
+      "assertions": [
+        {
+          "name": "still_draft",
+          "passed": true,
+          "expected": "draft",
+          "actual": "draft"
+        },
+        {
+          "name": "no_po_before",
+          "passed": true,
+          "expected": "0",
+          "actual": "0"
+        },
+        {
+          "name": "one_po",
+          "passed": true,
+          "expected": "1",
+          "actual": "1"
+        },
+        {
+          "name": "replay",
+          "passed": true,
+          "expected": "same ref",
+          "actual": "d875dc7e-babc-4490-bcd9-eaa2a816b9a4"
+        },
+        {
+          "name": "audit_has_create",
+          "passed": true,
+          "expected": "draft_created",
+          "actual": "['draft_created', 'approved', 'executed', 'replay_noop']"
+        }
+      ]
+    },
+    {
+      "id": "price_sim_bottle_cut",
+      "title": "Bottle price 20 to 18 keeps Decimal unit margin, delta, and elasticities",
+      "passed": true,
+      "formula_check": true,
+      "policy_guard": false,
+      "ops_minutes_saved": 20,
+      "estimated_relay_tokens": 400,
+      "measured_model_tokens": 0,
+      "assertions": [
+        {
+          "name": "version",
+          "passed": true,
+          "expected": "price_sim.v1",
+          "actual": "price_sim.v1"
+        },
+        {
+          "name": "unit_margin",
+          "passed": true,
+          "expected": "167.9/669.6",
+          "actual": "0.2507467144563918757467144564"
+        },
+        {
+          "name": "profit_delta",
+          "passed": true,
+          "expected": "-40.81",
+          "actual": "-40.81"
+        },
+        {
+          "name": "break_even_acos",
+          "passed": true,
+          "expected": "167.9/669.6",
+          "actual": "0.2507467144563918757467144564"
+        },
+        {
+          "name": "base_units",
+          "passed": true,
+          "expected": "61.6",
+          "actual": "61.6"
+        },
+        {
+          "name": "conservative_delta",
+          "passed": true,
+          "expected": "-30.736",
+          "actual": "-30.736"
+        },
+        {
+          "name": "optimistic_delta",
+          "passed": true,
+          "expected": "-50.884",
+          "actual": "-50.884"
+        },
+        {
+          "name": "current_acos",
+          "passed": true,
+          "expected": "665/525",
+          "actual": "1.266666666666666666666666667"
+        }
+      ]
+    },
+    {
+      "id": "price_sim_identity_and_edges",
+      "title": "Unchanged price has delta 0 and empty windows do not invent rates",
+      "passed": true,
+      "formula_check": true,
+      "policy_guard": false,
+      "ops_minutes_saved": 12,
+      "estimated_relay_tokens": 400,
+      "measured_model_tokens": 0,
+      "assertions": [
+        {
+          "name": "same_price_delta",
+          "passed": true,
+          "expected": "0",
+          "actual": "[Decimal('0'), Decimal('0'), Decimal('0')]"
+        },
+        {
+          "name": "same_margin",
+          "passed": true,
+          "expected": "unchanged",
+          "actual": "0.3030913978494623655913978495"
+        },
+        {
+          "name": "negative_price",
+          "passed": true,
+          "expected": "invalid_price",
+          "actual": "invalid_price"
+        },
+        {
+          "name": "unknown_sku",
+          "passed": true,
+          "expected": "sku_not_found",
+          "actual": "sku_not_found"
+        },
+        {
+          "name": "zero_units",
+          "passed": true,
+          "expected": "zero_units",
+          "actual": "zero_units"
+        }
+      ]
+    },
+    {
+      "id": "weekly_report_completeness",
+      "title": "Weekly report includes both stores and only sourced figures",
+      "passed": true,
+      "formula_check": true,
+      "policy_guard": false,
+      "ops_minutes_saved": 25,
+      "estimated_relay_tokens": 400,
+      "measured_model_tokens": 0,
+      "assertions": [
+        {
+          "name": "us_profit",
+          "passed": true,
+          "expected": "bridge figures",
+          "actual": "present"
+        },
+        {
+          "name": "uk_flat",
+          "passed": true,
+          "expected": "126.00 GBP",
+          "actual": "126.00"
+        },
+        {
+          "name": "no_fx_sum",
+          "passed": true,
+          "expected": "separate currencies",
+          "actual": "ok"
+        },
+        {
+          "name": "ad_cuts",
+          "passed": true,
+          "expected": "broad, exact, lamp",
+          "actual": "['camp-bottle-broad', 'camp-bottle-exact', 'camp-lamp']"
+        },
+        {
+          "name": "stockouts",
+          "passed": true,
+          "expected": "cable, lamp",
+          "actual": "['NS-CABLE-3PK', 'NS-LAMP-LED']"
+        },
+        {
+          "name": "supplier",
+          "passed": true,
+          "expected": "SUP-SZR",
+          "actual": "SUP-SZR"
+        },
+        {
+          "name": "competitor",
+          "passed": true,
+          "expected": "lamp competitor alerts",
+          "actual": "present"
+        },
+        {
+          "name": "sections",
+          "passed": true,
+          "expected": "five sections",
+          "actual": "checked"
+        },
+        {
+          "name": "sourced",
+          "passed": true,
+          "expected": "every decimal is in the JSON",
+          "actual": "[]"
+        },
+        {
+          "name": "no_narrative",
+          "passed": true,
+          "expected": "no invented wording",
+          "actual": "[]"
+        },
+        {
+          "name": "tokens",
+          "passed": true,
+          "expected": "0",
+          "actual": "0"
+        }
+      ]
+    },
+    {
+      "id": "weekly_report_approval_dry_run",
+      "title": "Weekly report counts a pending draft and does not write or send",
+      "passed": true,
+      "formula_check": false,
+      "policy_guard": true,
+      "ops_minutes_saved": 15,
+      "estimated_relay_tokens": 400,
+      "measured_model_tokens": 0,
+      "assertions": [
+        {
+          "name": "pending",
+          "passed": true,
+          "expected": "1",
+          "actual": "1"
+        },
+        {
+          "name": "not_executed",
+          "passed": true,
+          "expected": "0",
+          "actual": "0"
+        },
+        {
+          "name": "draft_kept",
+          "passed": true,
+          "expected": "draft",
+          "actual": "draft"
+        },
+        {
+          "name": "no_write",
+          "passed": true,
+          "expected": "0",
+          "actual": "0"
+        },
+        {
+          "name": "dry_run",
+          "passed": true,
+          "expected": "dry_run",
+          "actual": "dry_run"
+        },
+        {
+          "name": "card",
+          "passed": true,
+          "expected": "interactive",
+          "actual": "interactive"
+        },
+        {
+          "name": "sent_flag",
+          "passed": true,
+          "expected": "0",
+          "actual": "0"
+        }
+      ]
+    }
+  ]
+}

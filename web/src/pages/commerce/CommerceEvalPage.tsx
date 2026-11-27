@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/common/EmptyState';
 import { type Scorecard, commerce, errorText } from './api';
+import { useCommerceConnection } from './connection';
 
 export function CommerceEvalPage() {
+  const { online, epoch } = useCommerceConnection();
   const [scorecard, setScorecard] = useState<Scorecard | null>(null);
   const [missing, setMissing] = useState(false);
   const [offline, setOffline] = useState(false);
@@ -27,7 +29,7 @@ export function CommerceEvalPage() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, epoch]);
 
   async function run() {
     setRunning(true);
@@ -48,13 +50,15 @@ export function CommerceEvalPage() {
     }
   }
 
-  if (offline)
+  if (offline && !scorecard)
     return <EmptyState title="CommerceOps 未连接" description={message} />;
+
+  const paused = online === false || offline;
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={() => void run()} disabled={running}>
+        <Button onClick={() => void run()} disabled={running || paused}>
           {running ? '正在评测' : '运行评测'}
         </Button>
         <Button
@@ -89,8 +93,8 @@ export function CommerceEvalPage() {
                 : ''}
             </h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              估计节省运营时间 {scorecard.summary.ops_minutes_saved}{' '}
-              分钟。实测模型 token {scorecard.summary.measured_model_tokens}
+              规划估算运营时间 {scorecard.summary.ops_minutes_saved}{' '}
+              分钟，不是实测节省。实测模型 token {scorecard.summary.measured_model_tokens}
               。若只由模型转述工具结果，上限{' '}
               {scorecard.summary.estimated_relay_tokens} token。
             </p>

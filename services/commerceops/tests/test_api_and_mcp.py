@@ -3,12 +3,14 @@ from decimal import Decimal
 import json
 import sys
 
+import pytest
 from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from sqlalchemy import func, select
 
 from commerceops.mcp_contract import ALL_TOOLS, FORBIDDEN_TOOLS
 from commerceops.mcp_server import mcp
+from commerceops.db import session_factory_for
 from commerceops.models import AdCampaign, PurchaseOrder
 from commerceops.seed import AS_OF, CURRENT_END, CURRENT_START, US_STORE, seed_demo_data
 
@@ -27,7 +29,9 @@ def _tool_text(result) -> str:
 def test_health_profit_import_and_execute_contract(client):
     health = client.get("/health")
     assert health.status_code == 200
-    assert health.json()["formula_versions"]["profit"] == "profit.v1"
+    assert health.json()["status"] == "ok"
+    assert health.json()["service"] == "commerceops"
+    assert "formula_versions" not in health.json()
     assert "bridge" in client.get("/api/v1/formulas").json()["formulas"]["profit.v1"]
     assert client.post("/api/v1/seed").status_code == 200
     profit = client.get(
@@ -89,7 +93,7 @@ def test_mcp_tool_surface_and_in_process_writeback(seeded, database_url, monkeyp
         by_name = {tool.name: tool for tool in listed}
         assert by_name["commerceops_profit_report"].annotations.read_only_hint is True
         assert by_name["commerceops_create_purchase_order_draft"].annotations.destructive_hint is False
-        assert by_name["commerceops_approve_and_execute_draft"].annotations.destructive_hint is True
+        assert "commerceops_approve_and_execute_draft" not in names
         sop = await mcp.call_tool("commerceops_search_sops", {"query": "stockoutreorder", "limit": 1})
         quote = json.loads(_tool_text(sop))["hits"][0]
         assert quote["doc_id"] == "sop-stockout-supplier"
@@ -103,36 +107,109 @@ def test_mcp_tool_surface_and_in_process_writeback(seeded, database_url, monkeyp
             )
         )
         assert created["status"] == "draft"
-        approved = json.loads(
-            _tool_text(
-                await mcp.call_tool(
-                    "commerceops_approve_and_execute_draft",
-                    {"draft_id": created["draft_id"], "approver": "owner", "note": "human approved"},
-                )
-            )
-        )
-        replayed = json.loads(
-            _tool_text(
-                await mcp.call_tool(
-                    "commerceops_approve_and_execute_draft",
-                    {"draft_id": created["draft_id"], "approver": "owner", "note": "replay"},
-                )
-            )
-        )
-        return created, approved, replayed
+        from mcp.server.mcpserver.exceptions import ToolError
 
-    _created, approved, replayed = asyncio.run(_roundtrip())
+        with pytest.raises(ToolError):
+            await mcp.call_tool(
+                "commerceops_approve_and_execute_draft",
+                {"draft_id": created["draft_id"], "approver": "owner", "note": "agent must not approve"},
+            )
+        return created
+
+    created = asyncio.run(_roundtrip())
+    from commerceops.api.app import create_app
+    from tests.conftest import SignedClient
+
+    client = SignedClient(create_app(database_url))
+    approved = client.post(
+        f"/api/v1/drafts/{created['draft_id']}/approve-and-execute",
+        json={"approver": "member", "note": "human approved"},
+    )
+    assert approved.status_code == 200
+    replay = client.post(
+        f"/api/v1/drafts/{created['draft_id']}/approve-and-execute",
+        json={"approver": "owner", "note": "replay"},
+    )
+    assert replay.status_code == 200
     assert seeded.scalar(select(func.count()).select_from(PurchaseOrder)) == 1
-    assert approved["status"] == "executed"
-    assert replayed["replayed"] is True
-    assert replayed["execution_ref"] == approved["execution_ref"]
+    assert approved.json()["status"] == "executed"
+    assert replay.json()["replayed"] is True
+    assert replay.json()["execution_ref"] == approved.json()["execution_ref"]
     campaign = seeded.scalar(select(AdCampaign).where(AdCampaign.external_id == "camp-bottle-exact"))
     assert campaign.daily_budget == Decimal("45")
 
 
+def test_mcp_stdio_price_sim_and_weekly_report(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path}/stdio.db"
+    session = session_factory_for(database_url)()
+    try:
+        seed_demo_data(session)
+    finally:
+        session.close()
+    monkeypatch.delenv("FEISHU_WEBHOOK_URL", raising=False)
+
+    async def _stdio():
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "commerceops.mcp_server"],
+            env={
+                "COMMERCEOPS_DATABASE_URL": database_url,
+                "COMMERCEOPS_NOTIFY_LOG": str(tmp_path / "notify.jsonl"),
+                "COMMERCEOPS_WORKSPACE_ID": "ws-demo",
+                "COMMERCEOPS_SIGNING_SECRET": "test-signing-secret-32chars",
+            },
+        )
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write) as mcp_session:
+                await mcp_session.initialize()
+                listed = await mcp_session.list_tools()
+                names = {tool.name for tool in listed.tools}
+                assert "simulate_price_change" in names
+                assert "generate_weekly_report" in names
+                simulated = json.loads(
+                    _tool_text(
+                        await mcp_session.call_tool(
+                            "simulate_price_change",
+                            {
+                                "store_code": US_STORE,
+                                "sku": "NS-BOTTLE-1L",
+                                "target_price": "18.00",
+                                "start_date": CURRENT_START.isoformat(),
+                                "end_date": CURRENT_END.isoformat(),
+                            },
+                        )
+                    )
+                )
+                weekly = json.loads(
+                    _tool_text(
+                        await mcp_session.call_tool(
+                            "generate_weekly_report",
+                            {"push_feishu": True, "as_of": AS_OF.isoformat()},
+                        )
+                    )
+                )
+                return simulated, weekly
+
+    simulated, weekly = asyncio.run(_stdio())
+    assert simulated["formula_version"] == "price_sim.v1"
+    assert Decimal(simulated["profit_delta"]) == Decimal("-40.81")
+    assert [row["name"] for row in simulated["scenarios"]] == ["conservative", "base", "optimistic"]
+    assert "682.60" in weekly["markdown"]
+    assert weekly["notification"]["mode"] == "dry_run"
+    assert weekly["approvals"]["purchase_orders"] == 0
+    assert weekly["model_tokens"] == 0
+
+
 def test_mcp_stdio_lists_tools_and_returns_a_citation():
     async def _stdio():
-        params = StdioServerParameters(command=sys.executable, args=["-m", "commerceops.mcp_server"])
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "commerceops.mcp_server"],
+            env={
+                "COMMERCEOPS_WORKSPACE_ID": "ws-demo",
+                "COMMERCEOPS_SIGNING_SECRET": "test-signing-secret-32chars",
+            },
+        )
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()

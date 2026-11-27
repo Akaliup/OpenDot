@@ -172,6 +172,46 @@ export interface Scorecard {
   cases: EvalCase[];
 }
 
+export interface PriceScenario {
+  name: string;
+  elasticity: string;
+  volume_multiplier: string;
+  volume_status: string;
+  units: string;
+  period_profit: string;
+  profit_delta: string;
+}
+
+export interface PriceSimulation {
+  formula_version: string;
+  sku: string;
+  currency: string;
+  status: string;
+  current_price: string;
+  target_price: string;
+  new_unit_margin: { value: string | null; status: string };
+  break_even_acos: { value: string | null; status: string };
+  current_acos: { value: string | null; status: string };
+  acos_headroom: string | null;
+  profit_delta: string | null;
+  baseline_period_profit: string | null;
+  elasticity_note: string;
+  scenarios: PriceScenario[];
+}
+
+export interface WeeklyReport {
+  assembly: string;
+  markdown: string;
+  model_tokens: number;
+  notification: { mode: string } | null;
+  approvals: {
+    pending: number;
+    executed: number;
+    rejected: number;
+    purchase_orders: number;
+  };
+}
+
 export interface CommerceMeta {
   online: boolean;
   api_url: string;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/common/EmptyState';
@@ -8,11 +8,14 @@ import {
   type CommerceMeta,
   type CompetitorReport,
   type InventoryReport,
+  type PriceSimulation,
   type ProfitReport,
   type SupplierReport,
+  type WeeklyReport,
   commerce,
   errorText,
 } from './api';
+import { useCommerceConnection } from './connection';
 
 function money(value: string | null | undefined): string {
   if (value == null || value === '') return '—';
@@ -35,7 +38,15 @@ const STORES = [
   { code: 'uk-main', label: '英国站 uk-main' },
 ];
 
+const SCENARIO_LABEL: Record<string, string> = {
+  conservative: '保守',
+  base: '基准',
+  optimistic: '乐观',
+};
+
 export function CommerceOverviewPage() {
+  const { online, epoch } = useCommerceConnection();
+  const loadedStore = useRef<string | null>(null);
   const [store, setStore] = useState('us-main');
   const [meta, setMeta] = useState<CommerceMeta | null>(null);
   const [profit, setProfit] = useState<ProfitReport | null>(null);
@@ -49,16 +60,31 @@ export function CommerceOverviewPage() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [dataset, setDataset] = useState('orders');
+  const [sku, setSku] = useState('NS-BOTTLE-1L');
+  const [targetPrice, setTargetPrice] = useState('18.00');
+  const [priceSim, setPriceSim] = useState<PriceSimulation | null>(null);
+  const [weekly, setWeekly] = useState<WeeklyReport | null>(null);
+  const [simulating, setSimulating] = useState(false);
+  const [reporting, setReporting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setMessage('');
+    const requestStore = store;
+    if (loadedStore.current !== requestStore) {
+      setProfit(null);
+      setAds(null);
+      setInventory(null);
+      setSuppliers({});
+      setCompetitors(null);
+      setPriceSim(null);
+      setWeekly(null);
+    }
     try {
       const info = await commerce<CommerceMeta>('/meta');
       setMeta(info);
       if (!info.online) {
         setOffline(true);
-        setProfit(null);
         return;
       }
       setOffline(false);
@@ -74,11 +100,11 @@ export function CommerceOverviewPage() {
       setAds(adsBody);
       setInventory(inventoryBody);
       const quotes = await Promise.all(
-        inventoryBody.at_risk_skus.map(async (sku) => {
+        inventoryBody.at_risk_skus.map(async (item) => {
           const report = await commerce<SupplierReport>(
-            `/api/v1/suppliers/compare?store_code=${store}&sku=${sku}&as_of=${COMMERCE_PERIOD.asOf}`,
+            `/api/v1/suppliers/compare?store_code=${store}&sku=${item}&as_of=${COMMERCE_PERIOD.asOf}`,
           );
-          return [sku, report] as const;
+          return [item, report] as const;
         }),
       );
       setSuppliers(Object.fromEntries(quotes));
@@ -91,6 +117,11 @@ export function CommerceOverviewPage() {
       } else {
         setCompetitors(null);
       }
+      loadedStore.current = requestStore;
+      const codes = inventoryBody.skus.map((row) => row.sku);
+      if (codes.length > 0) {
+        setSku((current) => (codes.includes(current) ? current : codes[0]));
+      }
     } catch (error) {
       setOffline(true);
       setMessage(errorText(error));
@@ -101,7 +132,7 @@ export function CommerceOverviewPage() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, epoch]);
 
   async function resetSeed() {
     setMessage('');
@@ -152,6 +183,64 @@ export function CommerceOverviewPage() {
     }
   }
 
+  async function simulatePrice() {
+    const price = targetPrice.trim();
+    if (!price || !sku) {
+      setMessage('先填写 SKU 和目标售价。');
+      return;
+    }
+    setSimulating(true);
+    setMessage('');
+    try {
+      const result = await commerce<PriceSimulation>(
+        '/api/v1/price-simulations',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            store_code: store,
+            sku,
+            target_price: price,
+            start_date: COMMERCE_PERIOD.start,
+            end_date: COMMERCE_PERIOD.end,
+          }),
+        },
+      );
+      setPriceSim(result);
+      setOffline(false);
+    } catch (error) {
+      setMessage(errorText(error));
+    } finally {
+      setSimulating(false);
+    }
+  }
+
+  async function generateWeekly() {
+    setReporting(true);
+    setMessage('');
+    try {
+      const result = await commerce<WeeklyReport>('/api/v1/reports/weekly', {
+        method: 'POST',
+        body: JSON.stringify({
+          start_date: COMMERCE_PERIOD.start,
+          end_date: COMMERCE_PERIOD.end,
+          as_of: COMMERCE_PERIOD.asOf,
+          push_feishu: true,
+        }),
+        timeoutMs: 60_000,
+      });
+      setWeekly(result);
+      setOffline(false);
+      const mode = result.notification?.mode ?? 'none';
+      setMessage(`周报已生成，飞书模式 ${mode}。`);
+    } catch (error) {
+      setMessage(errorText(error));
+    } finally {
+      setReporting(false);
+    }
+  }
+
+  const paused = online === false || offline;
+
   const flagged = (ads?.campaigns ?? []).filter(
     (row) => row.budget.reason !== 'no_adjustment',
   );
@@ -191,8 +280,19 @@ export function CommerceOverviewPage() {
         <Button variant="outline" onClick={() => void resetSeed()}>
           重置演示数据
         </Button>
-        <Button variant="outline" onClick={() => void sendBrief()}>
+        <Button
+          variant="outline"
+          onClick={() => void sendBrief()}
+          disabled={paused}
+        >
           飞书简报
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => void generateWeekly()}
+          disabled={paused || reporting}
+        >
+          {reporting ? '正在生成周报' : '生成周报 / 推送飞书'}
         </Button>
       </div>
       {message && (
@@ -203,7 +303,9 @@ export function CommerceOverviewPage() {
       {offline && !profit ? (
         <EmptyState
           title="CommerceOps 未连接"
-          description={message || '启动 Python 服务后再刷新。'}
+          description={
+            message || '启动 Python 服务后再刷新。已有草案会留在数据库里。'
+          }
         />
       ) : null}
       {profit && (
@@ -211,15 +313,19 @@ export function CommerceOverviewPage() {
           className="rounded-xl border border-border bg-card/40 p-4"
           aria-label="利润桥"
         >
-          <h2 className="text-sm font-medium">近 7 天利润</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {profit.currency} 本期 {money(profit.current.net_profit)}，上期{' '}
-            {money(profit.previous?.net_profit)}，差额{' '}
-            {money(profit.bridge?.delta_net_profit)}。桥接恒等式{' '}
-            {profit.bridge?.identity_ok ? '成立' : '不成立'}。 销量{' '}
-            {profit.units_sold}。
+          <h2 className="text-sm font-medium">
+            演示窗口 {COMMERCE_PERIOD.start} 至 {COMMERCE_PERIOD.end}
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            这是历史样本，不是本周。美国站时区 America/New_York，英国站时区 Europe/London。
+            统计日 {COMMERCE_PERIOD.asOf}。
           </p>
-          <table className="mt-3 w-full text-left text-sm">
+          <p className="mt-2 text-sm text-muted-foreground">
+            {profit.units_sold === 0
+              ? '数据不足。这个窗口没有可计算的销量。'
+              : `${profit.currency} 本期 ${money(profit.current.net_profit)}，上期 ${money(profit.previous?.net_profit)}，差额 ${money(profit.bridge?.delta_net_profit)}。桥接恒等式 ${profit.bridge?.identity_ok ? '成立' : '不成立'}。 销量 ${profit.units_sold}。`}
+          </p>
+          <table className="mt-3 w-full text-left text-sm [&_td]:pr-4 [&_th]:pr-4">
             <thead className="text-muted-foreground">
               <tr>
                 <th className="py-2 font-medium">因素</th>
@@ -244,7 +350,8 @@ export function CommerceOverviewPage() {
         >
           <h2 className="text-sm font-medium">高 ACOS / 转化下滑</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            广告花费 {money(ads.total_ad_spend)}，商品销售额 {money(ads.total_sales)}，TACOS{' '}
+            广告花费 {money(ads.total_ad_spend)}，商品销售额{' '}
+            {money(ads.total_sales)}，TACOS{' '}
             {ratio(ads.tacos.value, ads.tacos.status)}
           </p>
           {flagged.length === 0 ? (
@@ -252,7 +359,7 @@ export function CommerceOverviewPage() {
               这个窗口没有需要削减的活动。
             </p>
           ) : (
-            <table className="mt-3 w-full text-left text-sm">
+            <table className="mt-3 w-full text-left text-sm [&_td]:pr-4 [&_th]:pr-4">
               <thead className="text-muted-foreground">
                 <tr>
                   <th className="py-2 font-medium">活动</th>
@@ -266,20 +373,22 @@ export function CommerceOverviewPage() {
                     key={row.campaign_external_id}
                     className="border-t border-border"
                   >
-                    <td className="py-2">
+                    <td className="py-2 whitespace-nowrap">
                       {row.name}
-                      <span className="ml-2 text-muted-foreground">
-                        {row.flags.join(', ')}
+                      <span className="text-muted-foreground">
+                        {' '}
+                        ({row.flags.join(', ')})
                       </span>
                     </td>
-                    <td className="py-2">
+                    <td className="py-2 whitespace-nowrap">
                       {ratio(row.current.acos.value, row.current.acos.status)}
                     </td>
-                    <td className="py-2">
+                    <td className="py-2 whitespace-nowrap">
                       {money(row.budget.current_daily_budget)} →{' '}
                       {money(row.budget.suggested_daily_budget)}
-                      <span className="ml-2 text-muted-foreground">
-                        {row.budget.reason}
+                      <span className="text-muted-foreground">
+                        {' '}
+                        ({row.budget.reason})
                       </span>
                     </td>
                   </tr>
@@ -340,6 +449,128 @@ export function CommerceOverviewPage() {
               </li>
             ))}
           </ul>
+        </section>
+      )}
+      <section
+        className="rounded-xl border border-border bg-card/40 p-4"
+        aria-label="价格模拟"
+      >
+        <h2 className="text-sm font-medium">价格模拟 price_sim.v1</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          目标售价按字符串进入计算。广告花费保持观察窗口的原值。乐观情景表示需求弹性更低。
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <label
+            className="text-sm text-muted-foreground"
+            htmlFor="commerce-sku"
+          >
+            SKU
+          </label>
+          <select
+            id="commerce-sku"
+            className="h-11 rounded-lg border border-border bg-background px-3 text-sm"
+            value={sku}
+            onChange={(event) => setSku(event.target.value)}
+          >
+            {(inventory && inventory.skus.length > 0
+              ? inventory.skus
+              : [{ sku }]
+            ).map((row) => (
+              <option key={row.sku} value={row.sku}>
+                {row.sku}
+              </option>
+            ))}
+          </select>
+          <label
+            className="text-sm text-muted-foreground"
+            htmlFor="commerce-target-price"
+          >
+            目标售价
+          </label>
+          <input
+            id="commerce-target-price"
+            className="h-11 w-32 rounded-lg border border-border bg-background px-3 text-sm"
+            inputMode="decimal"
+            value={targetPrice}
+            onChange={(event) => setTargetPrice(event.target.value)}
+          />
+          <Button
+            variant="outline"
+            onClick={() => void simulatePrice()}
+            disabled={paused || simulating}
+          >
+            {simulating ? '正在计算' : '计算价格'}
+          </Button>
+        </div>
+        {priceSim && (
+          <div className="mt-3 text-sm">
+            <p>
+              {priceSim.currency} {priceSim.current_price} →{' '}
+              {priceSim.target_price}
+              ，状态 {priceSim.status}。新单位毛利{' '}
+              {ratio(
+                priceSim.new_unit_margin.value,
+                priceSim.new_unit_margin.status,
+              )}
+              ，基准情景利润变化 {money(priceSim.profit_delta)}，盈亏平衡 ACOS{' '}
+              {ratio(
+                priceSim.break_even_acos.value,
+                priceSim.break_even_acos.status,
+              )}
+              ，当前 ACOS{' '}
+              {ratio(priceSim.current_acos.value, priceSim.current_acos.status)}
+              。
+            </p>
+            {priceSim.scenarios.length > 0 && (
+              <table className="mt-3 w-full text-left text-sm [&_td]:pr-4 [&_th]:pr-4">
+                <thead className="text-muted-foreground">
+                  <tr>
+                    <th className="py-2 font-medium">情景</th>
+                    <th className="py-2 font-medium">弹性</th>
+                    <th className="py-2 font-medium">销量倍数</th>
+                    <th className="py-2 font-medium">利润变化</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {priceSim.scenarios.map((row) => (
+                    <tr key={row.name} className="border-t border-border">
+                      <td className="py-2">
+                        {SCENARIO_LABEL[row.name] ?? row.name} {row.name}
+                      </td>
+                      <td className="py-2">{row.elasticity}</td>
+                      <td className="py-2 whitespace-nowrap">
+                        {row.volume_multiplier}
+                        <span className="text-muted-foreground">
+                          {' '}
+                          ({row.volume_status})
+                        </span>
+                      </td>
+                      <td className="py-2">{money(row.profit_delta)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </section>
+      {weekly && (
+        <section
+          className="rounded-xl border border-border bg-card/40 p-4"
+          aria-label="周报"
+        >
+          <h2 className="text-sm font-medium">
+            周报 {weekly.assembly}，飞书 {weekly.notification?.mode ?? '未推送'}
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            待审批 {weekly.approvals.pending}，已执行{' '}
+            {weekly.approvals.executed}
+            ，采购单 {weekly.approvals.purchase_orders}，模型 token{' '}
+            {weekly.model_tokens}。
+          </p>
+          <pre className="mt-3 overflow-auto whitespace-pre-wrap text-sm">
+            {weekly.markdown}
+          </pre>
         </section>
       )}
       <section

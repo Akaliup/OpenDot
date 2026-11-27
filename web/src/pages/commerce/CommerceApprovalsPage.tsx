@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/common/EmptyState';
-import { useAuthStore } from '../../stores/auth';
 import { type AuditEntry, type DraftRow, commerce, errorText } from './api';
+import { useCommerceConnection } from './connection';
 
 function decisionText(draft: DraftRow): string {
   const decision = draft.decision;
@@ -28,7 +28,7 @@ function decisionText(draft: DraftRow): string {
 }
 
 export function CommerceApprovalsPage() {
-  const username = useAuthStore((state) => state.user?.username || 'owner');
+  const { online, epoch } = useCommerceConnection();
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
@@ -42,7 +42,11 @@ export function CommerceApprovalsPage() {
       const body = await commerce<{ drafts: DraftRow[] }>('/api/v1/drafts');
       setDrafts(body.drafts);
       setOffline(false);
-      setSelected((current) => current ?? body.drafts[0]?.draft_id ?? null);
+      setSelected((current) =>
+        current && body.drafts.some((draft) => draft.draft_id === current)
+          ? current
+          : (body.drafts[0]?.draft_id ?? null),
+      );
     } catch (error) {
       setOffline(true);
       setMessage(errorText(error));
@@ -51,7 +55,7 @@ export function CommerceApprovalsPage() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, epoch]);
 
   useEffect(() => {
     if (!selected) {
@@ -71,7 +75,6 @@ export function CommerceApprovalsPage() {
       await commerce(`/api/v1/drafts/${selected}/${kind}`, {
         method: 'POST',
         body: JSON.stringify({
-          approver: username,
           note:
             kind === 'reject'
               ? 'Rejected in CommerceOps'
@@ -97,9 +100,15 @@ export function CommerceApprovalsPage() {
 
   const current = drafts.find((draft) => draft.draft_id === selected) ?? null;
   const pending = drafts.filter((draft) => draft.status === 'draft');
+  const paused = online === false || offline;
 
-  if (offline) {
-    return <EmptyState title="CommerceOps 未连接" description={message} />;
+  if (paused && drafts.length === 0) {
+    return (
+      <EmptyState
+        title="CommerceOps 未连接"
+        description={message || '草案还在数据库里。服务恢复后会回到这里。'}
+      />
+    );
   }
 
   return (
@@ -147,22 +156,29 @@ export function CommerceApprovalsPage() {
             <pre className="mt-3 whitespace-pre-wrap text-sm">
               {decisionText(current)}
             </pre>
-            {current.status === 'draft' && (
+            {current.status === 'draft' || current.status === 'executed' ? (
               <div className="mt-4 flex gap-2">
                 <Button
-                  disabled={busy}
+                  disabled={busy || paused}
                   onClick={() => void decide('approve-and-execute')}
                 >
-                  批准并执行
+                  {current.status === 'executed' ? '再次批准' : '批准并执行'}
                 </Button>
-                <Button
-                  variant="destructive"
-                  disabled={busy}
-                  onClick={() => void decide('reject')}
-                >
-                  拒绝
-                </Button>
+                {current.status === 'draft' && (
+                  <Button
+                    variant="destructive"
+                    disabled={busy || paused}
+                    onClick={() => void decide('reject')}
+                  >
+                    拒绝
+                  </Button>
+                )}
               </div>
+            ) : null}
+            {current.status === 'executed' && (
+              <p className="mt-2 text-sm text-muted-foreground">
+                再次批准只会记一条重放，采购单和预算修订不会再写一笔。
+              </p>
             )}
             {message && (
               <p className="mt-3 text-sm text-muted-foreground" role="status">
@@ -182,13 +198,14 @@ export function CommerceApprovalsPage() {
                 {audit.map((entry) => (
                   <tr key={entry.id} className="border-t border-border">
                     <td className="py-2">{entry.created_at}</td>
-                    <td className="py-2">
+                    <td className="py-2 whitespace-nowrap">
                       {entry.event}
-                      <span className="ml-2 text-muted-foreground">
-                        {typeof entry.detail.reason === 'string'
-                          ? entry.detail.reason
-                          : ''}
-                      </span>
+                      {typeof entry.detail.reason === 'string' ? (
+                        <span className="text-muted-foreground">
+                          {' '}
+                          ({entry.detail.reason})
+                        </span>
+                      ) : null}
                     </td>
                     <td className="py-2">{entry.actor}</td>
                   </tr>

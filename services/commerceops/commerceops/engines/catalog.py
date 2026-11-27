@@ -5,6 +5,7 @@ from __future__ import annotations
 from commerceops.engines.ads import FORMULA_VERSION as ADS_VERSION
 from commerceops.engines.competitor import FORMULA_VERSION as COMPETITOR_VERSION
 from commerceops.engines.inventory import FORMULA_VERSION as INVENTORY_VERSION
+from commerceops.engines.price_sim import FORMULA_VERSION as PRICE_SIM_VERSION
 from commerceops.engines.profit import FORMULA_VERSION as PROFIT_VERSION
 from commerceops.engines.suppliers import FORMULA_VERSION as SUPPLIER_VERSION
 from commerceops.engines.suppliers import WEIGHT_NOTE
@@ -16,6 +17,7 @@ FORMULA_VERSIONS = {
     "inventory": INVENTORY_VERSION,
     "supplier": SUPPLIER_VERSION,
     "competitor": COMPETITOR_VERSION,
+    "price_sim": PRICE_SIM_VERSION,
     "sop": SOP_VERSION,
 }
 
@@ -43,12 +45,14 @@ FORMULAS = {
         "average_daily_sales": "units ordered in the lookback / lookback_days; refunds are not removed",
         "days_of_cover": "available / average_daily_sales, or null status undefined_no_velocity when velocity is 0",
         "reorder_point": "average_daily_sales * lead_time_days + safety_stock, null when velocity is 0",
-        "suggested_order_qty": "ceiling of average_daily_sales * (lead_time + target_cover) + safety_stock - available - inbound",
+        "suggested_order_qty": "ceiling of average_daily_sales * (lead_time + target_cover) + safety_stock - available - effective_inbound",
+        "effective_inbound": "inbound with an ETA on or before the stockout date; late inbound and inbound with no ETA do not offset",
     },
     SUPPLIER_VERSION: {
         "landed_unit_cost": "unit_price * (1 + duty_rate) + freight_per_unit",
         "weights": WEIGHT_NOTE,
         "moq": "raw need of 0 stays 0; a positive need is snapped to the order multiple and then to MOQ",
+        "currency": "every quote in one comparison must share a currency; mixed currencies return mixed_currency_unsupported",
     },
     COMPETITOR_VERSION: {
         "price_drop": "price change percent <= -0.03",
@@ -56,6 +60,16 @@ FORMULAS = {
         "rating_drop": "older rating - newer rating >= 0.2",
         "complaint_spike": "negative review hits increased by at least 10",
         "origin": "imported snapshots only; collection_method is demo_seed, manual_import, or licensed_feed",
+    },
+    PRICE_SIM_VERSION: {
+        "scale": "target_price / current_list_price",
+        "scaled_contribution": "net_sales * scale - net_cogs - platform_fees * scale - shipping_fees - other_fees",
+        "unit_margin": "scaled_contribution / (net_sales * scale), null status zero_net_sales or negative_net_sales",
+        "break_even_acos": "scaled_contribution / scaled net sales when both are positive; otherwise null with a status",
+        "volume_multiplier": "max(0, 1 + elasticity * (target_price - current_price) / current_price)",
+        "elasticities": "conservative -1.6, base -1.0, optimistic -0.4; optimistic means less elastic",
+        "profit_delta": "base scenario period profit minus baseline period profit; ad spend does not scale",
+        "zero_units": "no observed units yields status zero_units and does not invent rates",
     },
     SOP_VERSION: {
         "ranker": "BM25 with k1=1.5 and b=0.75",

@@ -8,6 +8,8 @@ READ_TOOLS = (
     "commerceops_supplier_comparison",
     "commerceops_competitor_diff",
     "commerceops_search_sops",
+    "simulate_price_change",
+    "generate_weekly_report",
 )
 
 DRAFT_TOOLS = (
@@ -16,11 +18,12 @@ DRAFT_TOOLS = (
     "commerceops_create_competitor_response_draft",
 )
 
-APPROVAL_TOOLS = ("commerceops_approve_and_execute_draft",)
+APPROVAL_TOOLS = ()
 
-ALL_TOOLS = READ_TOOLS + DRAFT_TOOLS + APPROVAL_TOOLS
+ALL_TOOLS = READ_TOOLS + DRAFT_TOOLS
 
 FORBIDDEN_TOOLS = (
+    "commerceops_approve_and_execute_draft",
     "commerceops_execute_draft",
     "commerceops_import_orders",
     "commerceops_import_ad_metrics",

@@ -1,22 +1,28 @@
 # CommerceOps phase 1
 
 CommerceOps is a cross-border commerce operating slice on top of OpenDot.
-Phase 1 adds one Python service and this document. It does not change the
-OpenDot runtime, schema, routes, or React app.
+The interview release (price simulation, weekly report, Docker, and offline
+recovery) is documented in
+[commerceops-final-delivery.md](commerceops-final-delivery.md). The formula
+and approval rules below still apply.
+
+Phase 1 added the Python service. It did not change the OpenDot runtime,
+schema, routes, or React app. Phase 2 attached the proxy, the 经营 pages, and
+the project skill.
 
 ## What was already in OpenDot
 
 OpenDot is the agent runtime. The pieces Phase 2 will attach to, and that
 this phase deliberately leaves alone:
 
-| Concern | Where it lives |
-| --- | --- |
-| Product runtime, channels, scheduler, IPC | `src/index.ts`, `src/task-scheduler.ts`, `src/feishu.ts` |
-| HTTP app and auth | `src/web.ts`, `docs/API.md`, `docs/ACL-MATRIX.md` |
-| User MCP registration (stdio command, args, env) | `src/routes/mcp-servers.ts` |
-| In-process agent tools | `container/agent-runner/src/mcp-tools.ts` |
-| External MCP client and approval ledger | `docs/mcp-integration.md`, `docs/mcp-approvals.md` |
-| Web routes | `web/src/App.tsx` |
+| Concern                                          | Where it lives                                           |
+| ------------------------------------------------ | -------------------------------------------------------- |
+| Product runtime, channels, scheduler, IPC        | `src/index.ts`, `src/task-scheduler.ts`, `src/feishu.ts` |
+| HTTP app and auth                                | `src/web.ts`, `docs/API.md`, `docs/ACL-MATRIX.md`        |
+| User MCP registration (stdio command, args, env) | `src/routes/mcp-servers.ts`                              |
+| In-process agent tools                           | `container/agent-runner/src/mcp-tools.ts`                |
+| External MCP client and approval ledger          | `docs/mcp-integration.md`, `docs/mcp-approvals.md`       |
+| Web routes                                       | `web/src/App.tsx`                                        |
 
 Managed MCP servers are stdio or HTTP processes with an explicit command.
 Tool calls still go through OpenDot's owner, session, and approval ledger.
@@ -43,8 +49,8 @@ purchase order, or edit a competitor snapshot. The only apply path is
 `approve_and_execute_draft`, and it writes an approval row in the same
 transaction as the operational row.
 
-Phase 2 should not give that apply tool to the model by itself. The model
-creates drafts. A person approves in OpenDot, and OpenDot then calls apply.
+The model creates drafts. It has no approve or execute tool. A person
+approves in OpenDot, and OpenDot then calls `approve_and_execute_draft`.
 The Python gate still refuses a bare execute, so a missed UI check fails
 closed.
 
@@ -62,18 +68,18 @@ closed.
 
 ## Data
 
-| Table | Role |
-| --- | --- |
-| `stores`, `products` | Marketplace and SKU / ASIN catalog |
-| `orders`, `refunds` | Profit facts. Orders have no ad-spend column |
-| `ad_campaigns`, `ad_metric_days` | Campaign budget plus daily delivery and attribution |
-| `inventory_snapshots` | On-hand, reserved, inbound, safety stock, planning lead time |
-| `suppliers`, `supplier_quotes` | Tiered price, duty, freight, MOQ, lead time, on-time sample |
-| `competitor_snapshots` | Imported price, BSR, rating, review-hit history |
-| `sop_documents` | The four markdown procedures, also read from disk for citations |
-| `action_drafts`, `approval_records` | Draft payload and the explicit approval or rejection |
-| `writeback_audit_logs` | Append-only. SQLite triggers reject update and delete |
-| `ad_budget_revisions`, `purchase_orders`, `competitor_responses` | The only operational writebacks |
+| Table                                                            | Role                                                            |
+| ---------------------------------------------------------------- | --------------------------------------------------------------- |
+| `stores`, `products`                                             | Marketplace and SKU / ASIN catalog                              |
+| `orders`, `refunds`                                              | Profit facts. Orders have no ad-spend column                    |
+| `ad_campaigns`, `ad_metric_days`                                 | Campaign budget plus daily delivery and attribution             |
+| `inventory_snapshots`                                            | On-hand, reserved, inbound, safety stock, planning lead time    |
+| `suppliers`, `supplier_quotes`                                   | Tiered price, duty, freight, MOQ, lead time, on-time sample     |
+| `competitor_snapshots`                                           | Imported price, BSR, rating, review-hit history                 |
+| `sop_documents`                                                  | The four markdown procedures, also read from disk for citations |
+| `action_drafts`, `approval_records`                              | Draft payload and the explicit approval or rejection            |
+| `writeback_audit_logs`                                           | Append-only. SQLite triggers reject update and delete           |
+| `ad_budget_revisions`, `purchase_orders`, `competitor_responses` | The only operational writebacks                                 |
 
 `ad_metric_days` is the daily child of `ad_campaigns`. Period math needs it.
 `purchase_orders.sent_to_supplier` cannot be set: triggers abort an insert or
@@ -150,12 +156,12 @@ Flags:
 
 Budget ladder, applied to the current daily budget and rounded to cents:
 
-| Condition | Multiplier | Reason |
-| --- | --- | --- |
-| ACOS >= 0.80 | 0.50 | `severe_acos` |
-| ACOS >= 0.40 | 0.70 | `high_acos` |
-| else spend-up and CVR-down | 0.80 | `cvr_decline` |
-| else | 1 | `no_adjustment` |
+| Condition                  | Multiplier | Reason          |
+| -------------------------- | ---------- | --------------- |
+| ACOS >= 0.80               | 0.50       | `severe_acos`   |
+| ACOS >= 0.40               | 0.70       | `high_acos`     |
+| else spend-up and CVR-down | 0.80       | `cvr_decline`   |
+| else                       | 1          | `no_adjustment` |
 
 `no_adjustment` does not create a draft.
 
@@ -166,16 +172,18 @@ available = max(on_hand - reserved, 0)
 average_daily_sales = units ordered in the lookback / lookback_days
 days_of_cover = available / average_daily_sales
 reorder_point = average_daily_sales * planning_lead_time + safety_stock
-need = average_daily_sales * (lead_time + target_cover) + safety_stock - available - inbound
+need = average_daily_sales * (lead_time + target_cover) + safety_stock - available - effective_inbound
 ```
 
 Refunds are not removed from demand. The lookback ends the day before `as_of`.
 Average daily sales of zero yields status `undefined_no_velocity`: days of
 cover and reorder point are null, and the SKU is not marked at risk. A SKU
 with sales and zero available has cover 0 and is at risk. Reserved above
-on-hand is oversold, and available is 0 rather than negative. Inbound quantity
-reduces the need even when its ETA is after the stockout date; that case sets
-`inbound_late`. Suggested units are the ceiling of the need. MOQ is not
+on-hand is oversold, and available is 0 rather than negative. Only inbound
+with an ETA on or before the stockout date offsets the need. A later ETA sets
+`inbound_late` and does not offset. Inbound with no ETA is
+`unknown_eta_inbound_qty` and does not offset. Suggested units are the ceiling
+of the need. MOQ is not
 applied here.
 
 ### supplier.v1
@@ -201,16 +209,31 @@ time longer than days of cover is `arrives_after_stockout`.
 The latest snapshot at or before `as_of` is diffed with the one before it.
 One snapshot is `insufficient_history` and raises no alert.
 
-| Alert | Rule |
-| --- | --- |
-| `price_drop` | percent change <= -3% |
-| `bsr_jump` | rank number fell by at least 200 (the product became more competitive) |
-| `rating_drop` | rating fell by at least 0.2 |
-| `complaint_spike` | negative-review hits rose by at least 10 |
+| Alert             | Rule                                                                   |
+| ----------------- | ---------------------------------------------------------------------- |
+| `price_drop`      | percent change <= -3%                                                  |
+| `bsr_jump`        | rank number fell by at least 200 (the product became more competitive) |
+| `rating_drop`     | rating fell by at least 0.2                                            |
+| `complaint_spike` | negative-review hits rose by at least 10                               |
 
 A zero starting price is `zero_base_price` and is not a price-drop alert.
 Each alert maps to one action code. The action text includes the source,
 collection method, timestamps, and the numbers. Demo rows stay `sample_data`.
+
+### price_sim.v1
+
+```text
+scale = target_price / current_list_price
+scaled_contribution = net_sales * scale - net_cogs - platform_fees * scale - shipping_fees - other_fees
+volume_multiplier = max(0, 1 + elasticity * (target_price - current_price) / current_price)
+period_profit = scaled_contribution * volume_multiplier - ad_spend
+```
+
+Elasticities are published constants: conservative -1.6, base -1.0, optimistic
+-0.4. Optimistic means demand is less elastic. Ad spend stays at the observed
+window total. Unit margin and break-even ACOS are the contribution ratio at
+the target price. A window with no units is `zero_units` and does not invent
+rates. A negative contribution has break-even status `negative_unit_margin`.
 
 ## SOP citations
 
@@ -224,17 +247,22 @@ embedding service.
 ## MCP and HTTP
 
 Read tools: list stores, profit report, ads diagnosis, inventory risk,
-supplier comparison, competitor diff, SOP search.
+supplier comparison, competitor diff, SOP search, `simulate_price_change`,
+and `generate_weekly_report`. The weekly report can dry-run or send a Feishu
+card. It does not create a draft.
 
 Draft tools: `commerceops_create_ad_budget_draft`,
 `commerceops_create_purchase_order_draft`,
 `commerceops_create_competitor_response_draft`.
 
-Apply tool: `commerceops_approve_and_execute_draft`.
+The MCP server does not register an approve or execute tool.
+`commerceops_approve_and_execute_draft` is not in the tool list. Approval
+runs only through the signed OpenDot route
+`POST /api/v1/drafts/{id}/approve-and-execute`.
 
 There is no execute tool, no import tool, and no "send purchase order" tool.
 Read tools are marked read-only. Draft tools are not marked destructive.
-The apply tool is. Repeating apply on an executed draft returns the same
+Repeating a signed approval on an executed draft returns the same
 `execution_ref` and writes `replay_noop` instead of a second revision or
 purchase order. A draft whose recomputed decision no longer matches is
 `stale_draft` and is not applied. Rejected drafts stay rejected.
@@ -259,9 +287,10 @@ numbers, SOP quotes, and a stop at draft creation. The pages live at
 
 Feishu cards are sent only when `FEISHU_WEBHOOK_URL` is set. Otherwise the
 same card is a dry-run record on `GET /api/v1/notifications`. The eval bench
-in `services/commerceops/commerceops/evals/bench.py` runs ten tool-contract
-cases and writes `scorecard.json` plus `scorecard.html`. `GET /api/v1/evals/latest`
-reads that file.
+in `services/commerceops/commerceops/evals/bench.py` runs 14 tool-contract
+cases and writes `scorecard.json` plus `scorecard.html`. The committed copy
+is `services/commerceops/evals/`. `GET /api/v1/evals/latest` reads the
+directory in `COMMERCEOPS_EVAL_DIR`, defaulting to `commerceops-evals/`.
 
 The click-through script is [commerceops-demo-runbook.md](commerceops-demo-runbook.md).
 

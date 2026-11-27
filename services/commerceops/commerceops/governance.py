@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from commerceops.clock import utc_now
+from commerceops.context import current_workspace
 from commerceops.engines.money import D
 from commerceops.errors import (
     CommerceOpsError,
@@ -118,8 +119,9 @@ def create_competitor_response_draft(
     )
 
 
-def execute_draft(session: Session, draft_id: str, actor: str) -> dict:
+def execute_draft(session: Session, draft_id: str, actor: str, *, authorized: bool = False) -> dict:
     """Apply a draft only when an approval record already exists. This does not create one."""
+    _require_authorized(authorized)
     draft = _draft(session, draft_id)
     actor = _actor(actor)
     if draft.status == "executed":
@@ -138,7 +140,15 @@ def execute_draft(session: Session, draft_id: str, actor: str) -> dict:
     return _apply_and_commit(session, draft, actor)
 
 
-def approve_and_execute_draft(session: Session, draft_id: str, approver: str, note: str = "") -> dict:
+def approve_and_execute_draft(
+    session: Session,
+    draft_id: str,
+    approver: str,
+    note: str = "",
+    *,
+    authorized: bool = False,
+) -> dict:
+    _require_authorized(authorized)
     draft = _draft(session, draft_id)
     approver = _actor(approver)
     if draft.status == "executed":
@@ -167,6 +177,7 @@ def approve_and_execute_draft(session: Session, draft_id: str, approver: str, no
         raise CommerceOpsError("draft is stale", code="stale_draft", status_code=409, details={"draft_id": draft_id})
     approval = ApprovalRecord(
         id=str(uuid4()),
+        workspace_id=draft.workspace_id,
         draft_id=draft.id,
         approver=approver,
         note=note.strip(),
@@ -180,7 +191,15 @@ def approve_and_execute_draft(session: Session, draft_id: str, approver: str, no
     return _apply_and_commit(session, draft, approver)
 
 
-def reject_draft(session: Session, draft_id: str, approver: str, note: str = "") -> dict:
+def reject_draft(
+    session: Session,
+    draft_id: str,
+    approver: str,
+    note: str = "",
+    *,
+    authorized: bool = False,
+) -> dict:
+    _require_authorized(authorized)
     draft = _draft(session, draft_id)
     approver = _actor(approver)
     if draft.status != "draft":
@@ -192,6 +211,7 @@ def reject_draft(session: Session, draft_id: str, approver: str, note: str = "")
         )
     approval = ApprovalRecord(
         id=str(uuid4()),
+        workspace_id=draft.workspace_id,
         draft_id=draft.id,
         approver=approver,
         note=note.strip(),
@@ -208,7 +228,9 @@ def reject_draft(session: Session, draft_id: str, approver: str, note: str = "")
 
 
 def list_drafts(session: Session, status: str | None = None) -> dict:
-    query = select(ActionDraft).order_by(ActionDraft.created_at.desc(), ActionDraft.id.desc())
+    query = select(ActionDraft).where(ActionDraft.workspace_id == current_workspace()).order_by(
+        ActionDraft.created_at.desc(), ActionDraft.id.desc()
+    )
     if status:
         query = query.where(ActionDraft.status == status)
     return {"drafts": [_summary(row) for row in session.scalars(query).all()]}
@@ -264,10 +286,14 @@ def _create(
     formula_version: str,
 ) -> dict:
     actor = _actor(created_by)
-    store = session.scalar(select(Store).where(Store.code == store_code))
+    workspace = current_workspace()
+    store = session.scalar(
+        select(Store).where(Store.code == store_code, Store.workspace_id == workspace)
+    )
     if store is None:
         raise CommerceOpsError(f"store not found: {store_code}", code="store_not_found", status_code=404)
     identity = {
+        "workspace_id": workspace,
         "action_type": action_type,
         "store_code": store_code,
         "start_date": None if start is None else start.isoformat(),
@@ -292,6 +318,7 @@ def _create(
     encoded = _canonical(payload)
     draft = ActionDraft(
         id=str(uuid4()),
+        workspace_id=workspace,
         action_type=action_type,
         status="draft",
         idempotency_key=key,
@@ -339,6 +366,7 @@ def _apply(session: Session, draft: ActionDraft) -> str:
             raise CommerceOpsError("campaign not found", code="campaign_not_found", status_code=404)
         revision = AdBudgetRevision(
             id=str(uuid4()),
+            workspace_id=draft.workspace_id,
             draft_id=draft.id,
             campaign_id=campaign.id,
             previous_daily_budget=campaign.daily_budget,
@@ -350,11 +378,17 @@ def _apply(session: Session, draft: ActionDraft) -> str:
         session.flush()
         return revision.id
     if draft.action_type == "purchase_order":
-        supplier = session.scalar(select(Supplier).where(Supplier.code == decision["supplier_code"]))
+        supplier = session.scalar(
+            select(Supplier).where(
+                Supplier.code == decision["supplier_code"],
+                Supplier.workspace_id == draft.workspace_id,
+            )
+        )
         if supplier is None:
             raise CommerceOpsError("supplier not found", code="supplier_not_found", status_code=404)
         order = PurchaseOrder(
             id=str(uuid4()),
+            workspace_id=draft.workspace_id,
             draft_id=draft.id,
             store_id=draft.store_id,
             supplier_id=supplier.id,
@@ -373,6 +407,7 @@ def _apply(session: Session, draft: ActionDraft) -> str:
     if draft.action_type == "competitor_response":
         response = CompetitorResponse(
             id=str(uuid4()),
+            workspace_id=draft.workspace_id,
             draft_id=draft.id,
             store_id=draft.store_id,
             sku=decision["sku"],
@@ -420,9 +455,18 @@ def _recompute(session: Session, draft: ActionDraft) -> dict:
 
 def _draft(session: Session, draft_id: str) -> ActionDraft:
     draft = session.get(ActionDraft, draft_id)
-    if draft is None:
+    if draft is None or draft.workspace_id != current_workspace():
         raise DraftNotFound(draft_id)
     return draft
+
+
+def _require_authorized(authorized: bool) -> None:
+    if not authorized:
+        raise CommerceOpsError(
+            "approval is not authorized for this user",
+            code="approval_forbidden",
+            status_code=403,
+        )
 
 
 def _audit(session: Session, draft: ActionDraft, event: str, actor: str, detail: dict) -> None:
@@ -434,6 +478,7 @@ def _audit(session: Session, draft: ActionDraft, event: str, actor: str, detail:
             payload_hash=draft.payload_hash,
             detail_json=_canonical(detail),
             created_at=utc_now(),
+            workspace_id=draft.workspace_id,
         )
     )
 
@@ -489,8 +534,9 @@ def _actor(value: str) -> str:
 
 
 def _idempotency_key(explicit: str | None, identity: dict) -> str:
+    workspace = str(identity.get("workspace_id") or current_workspace())
     if explicit is not None and explicit.strip():
-        key = explicit.strip()
+        key = f"{workspace}:{explicit.strip()}"
         if len(key) > 200:
             raise CommerceOpsError("idempotency key is too long", code="invalid_idempotency_key", status_code=422)
         return key

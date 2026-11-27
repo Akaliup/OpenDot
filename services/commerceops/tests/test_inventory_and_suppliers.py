@@ -102,13 +102,15 @@ def test_reorder_point_inbound_and_ceiling():
         velocity_status=cover.status,
     )
     assert plan.reorder_point == Decimal("75")
-    assert plan.suggested_order_qty_exact == Decimal("197")
-    assert plan.suggested_order_qty == 197
+    assert plan.suggested_order_qty_exact == Decimal("207")
+    assert plan.suggested_order_qty == 207
+    assert plan.effective_inbound_qty == 0
+    assert plan.unknown_eta_inbound_qty == 0
     assert plan.inbound_late is True
     assert unconstrained_need(Decimal("2.5"), 4, 2, 1, 3, 0) == Decimal("13")
 
 
-def test_inbound_without_eta_is_not_marked_late_and_still_reduces_need():
+def test_inbound_without_eta_does_not_offset_demand():
     plan = plan_replenishment(
         average_daily_sales_value=Decimal("1"),
         planning_lead_time_days=5,
@@ -121,7 +123,9 @@ def test_inbound_without_eta_is_not_marked_late_and_still_reduces_need():
         velocity_status="ok",
     )
     assert plan.inbound_late is False
-    assert plan.suggested_order_qty_exact == Decimal("5")
+    assert plan.unknown_eta_inbound_qty == 3
+    assert plan.effective_inbound_qty == 0
+    assert plan.suggested_order_qty_exact == Decimal("8")
 
 
 def test_landed_cost_tiers_and_moq():

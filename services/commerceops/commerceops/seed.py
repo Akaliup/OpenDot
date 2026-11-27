@@ -21,12 +21,15 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 import json
+import os
 from pathlib import Path
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from commerceops.config import get_settings
+from commerceops.context import DEMO_WORKSPACE, bind_workspace, current_workspace, reset_workspace
+from commerceops.errors import CommerceOpsError
 from commerceops.csv_import import import_rows
 from commerceops.db import session_factory_for
 from commerceops.models import (
@@ -304,19 +307,27 @@ def _competitor_rows() -> list[dict[str, str]]:
     return rows
 
 
-def _upsert_store(session: Session, code: str, name: str, marketplace: str, currency: str, timezone: str) -> None:
-    store = session.get(Store, code)
+def _upsert_store(session: Session, workspace_id: str, code: str, name: str, marketplace: str, currency: str, timezone: str) -> None:
+    identity = f"{workspace_id}:{code}"
+    store = session.get(Store, identity)
+    values = dict(
+        workspace_id=workspace_id,
+        code=code,
+        name=name,
+        marketplace=marketplace,
+        currency=currency,
+        timezone=timezone,
+    )
     if store is None:
-        session.add(Store(id=code, code=code, name=name, marketplace=marketplace, currency=currency, timezone=timezone))
+        session.add(Store(id=identity, **values))
         return
-    store.name = name
-    store.marketplace = marketplace
-    store.currency = currency
-    store.timezone = timezone
+    for key, value in values.items():
+        setattr(store, key, value)
 
 
 def _upsert_product(
     session: Session,
+    workspace_id: str,
     store_code: str,
     sku: str,
     asin: str,
@@ -326,10 +337,12 @@ def _upsert_product(
     bullets: str,
     currency: str,
 ) -> None:
-    identity = f"{store_code}:{sku}"
+    store_id = f"{workspace_id}:{store_code}"
+    identity = f"{store_id}:{sku}"
     product = session.get(Product, identity)
     values = dict(
-        store_id=store_code,
+        workspace_id=workspace_id,
+        store_id=store_id,
         sku=sku,
         asin=asin,
         title=title,
@@ -366,14 +379,29 @@ def _seed_sops(session: Session) -> None:
         existing.source_sha256 = document.sha256
 
 
-def seed_demo_data(session: Session) -> dict[str, int]:
-    _upsert_store(session, US_STORE, "Northstar US", "amazon_us", "USD", "America/New_York")
-    _upsert_store(session, UK_STORE, "Northstar UK", "amazon_uk", "GBP", "Europe/London")
-    _upsert_product(session, US_STORE, "NS-BOTTLE-1L", "B0BOTTLE1L", "Northstar Insulated Bottle 1L", "20.00", "4.50", "Double wall; leakproof lid.", "USD")
-    _upsert_product(session, US_STORE, "NS-YOGA-MAT", "B0YOGAMAT1", "Northstar Travel Yoga Mat", "30.00", "6.00", "Closed-cell; carry strap.", "USD")
-    _upsert_product(session, US_STORE, "NS-CABLE-3PK", "B0CABLE3PK", "Northstar Cable 3-Pack", "15.00", "2.20", "Braided; 1m 2m 3m.", "USD")
-    _upsert_product(session, US_STORE, "NS-LAMP-LED", "B0LAMPLED1", "Northstar LED Desk Lamp", "40.00", "8.00", "Touch dimmer; USB-C.", "USD")
-    _upsert_product(session, UK_STORE, "UK-MUG", "B0UKMUG001", "Northstar Stack Mug", "15.00", "4.00", "Stoneware; dishwasher safe.", "GBP")
+def seed_demo_data(session: Session, workspace_id: str | None = None) -> dict[str, int]:
+    if workspace_id:
+        workspace = workspace_id
+    else:
+        try:
+            workspace = current_workspace()
+        except CommerceOpsError:
+            workspace = os.environ.get("COMMERCEOPS_WORKSPACE_ID", DEMO_WORKSPACE)
+    token = bind_workspace(workspace)
+    try:
+        return _seed_demo_data(session, workspace)
+    finally:
+        reset_workspace(token)
+
+
+def _seed_demo_data(session: Session, workspace: str) -> dict[str, int]:
+    _upsert_store(session, workspace, US_STORE, "Northstar US", "amazon_us", "USD", "America/New_York")
+    _upsert_store(session, workspace, UK_STORE, "Northstar UK", "amazon_uk", "GBP", "Europe/London")
+    _upsert_product(session, workspace, US_STORE, "NS-BOTTLE-1L", "B0BOTTLE1L", "Northstar Insulated Bottle 1L", "20.00", "4.50", "Double wall; leakproof lid.", "USD")
+    _upsert_product(session, workspace, US_STORE, "NS-YOGA-MAT", "B0YOGAMAT1", "Northstar Travel Yoga Mat", "30.00", "6.00", "Closed-cell; carry strap.", "USD")
+    _upsert_product(session, workspace, US_STORE, "NS-CABLE-3PK", "B0CABLE3PK", "Northstar Cable 3-Pack", "15.00", "2.20", "Braided; 1m 2m 3m.", "USD")
+    _upsert_product(session, workspace, US_STORE, "NS-LAMP-LED", "B0LAMPLED1", "Northstar LED Desk Lamp", "40.00", "8.00", "Touch dimmer; USB-C.", "USD")
+    _upsert_product(session, workspace, UK_STORE, "UK-MUG", "B0UKMUG001", "Northstar Stack Mug", "15.00", "4.00", "Stoneware; dishwasher safe.", "GBP")
     session.commit()
     import_rows(session, "orders", _order_rows())
     import_rows(session, "refunds", _refund_rows())
@@ -411,7 +439,7 @@ def main() -> None:
 
     session = session_factory_for(get_settings().database_url)()
     try:
-        counts = seed_demo_data(session)
+        counts = seed_demo_data(session, os.environ.get("COMMERCEOPS_WORKSPACE_ID", DEMO_WORKSPACE))
         report = profit_report(session, US_STORE, CURRENT_START, CURRENT_END, compare=True)
         print(
             json.dumps(
