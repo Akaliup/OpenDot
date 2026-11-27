@@ -61,3 +61,27 @@ Money stays in `Decimal`. A zero denominator is a status (`zero_net_sales`,
 infinity. Draft tools do not change budgets, purchase orders, or competitor
 snapshots. `approve_and_execute_draft` is the only writeback, and repeating it
 does not apply the draft twice.
+
+## Agent evaluation
+
+From the repository root, install the locked Node dependencies and the CommerceOps
+Python package with its dev extra. Select that Python interpreter via
+`COMMERCEOPS_EVAL_PYTHON` if it is not the default `python`.
+
+```sh
+python services/commerceops/evals/scripted_scorecard.py
+node --import tsx services/commerceops/evals/live_agent.mjs --check-mcp
+node --import tsx services/commerceops/evals/live_agent.mjs
+```
+
+The middle command exercises OpenDot managed MCP discovery and dispatch against
+a temporary seeded database without making a model request. For the last command,
+provide `DEEPSEEK_API_KEY` and `DEEPSEEK_BASE_URL` through the process environment.
+The runner accepts the official HTTPS API origin with an optional /v1 suffix.
+`DEEPSEEK_MODEL` defaults to deepseek-chat. Missing configuration produces eight
+skipped rows. Each case gets its own workspace database and tool catalog.
+The run allows at most 45 completion requests, 900 completion tokens per request
+and 1.1 MB of cumulative request bodies. Estimated cost is null.
+The evaluation page reads the scripted and live JSON files from
+`COMMERCEOPS_EVAL_DIR` or the bundled evals directory. Its run button triggers the
+deterministic bench only.

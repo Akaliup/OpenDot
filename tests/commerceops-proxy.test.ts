@@ -1,4 +1,9 @@
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import { Hono } from 'hono';
+import * as db from '../src/db.js';
+import * as context from '../src/web-context.js';
+import { signSessionToken } from '../src/auth.js';
+import routes from '../src/routes/commerceops.js';
 import {
   COMMERCEOPS_MCP_PRESET,
   canonicalCommerceIdentity,
@@ -99,21 +104,99 @@ describe('CommerceOps proxy', () => {
       'test-signing-secret-32chars',
       1_700_000_000_000,
     );
-    expect(token.startsWith(payload.replace('"exp":1700000000', '"exp":1700000060'))).toBe(
-      true,
-    );
+    expect(
+      token.startsWith(payload.replace('"exp":1700000000', '"exp":1700000060')),
+    ).toBe(true);
     const stripped = stripUntrustedCommerceBody(
       new TextEncoder().encode(
         JSON.stringify({ approver: 'owner', created_by: 'owner', note: 'ok' }),
       ).buffer,
       'application/json',
     );
-    expect(JSON.parse(new TextDecoder().decode(stripped))).toEqual({ note: 'ok' });
-    expect(hasPermission({ role: 'member', permissions: [] }, 'approve_commerceops')).toBe(
-      false,
+    expect(JSON.parse(new TextDecoder().decode(stripped))).toEqual({
+      note: 'ok',
+    });
+    expect(
+      hasPermission({ role: 'member', permissions: [] }, 'approve_commerceops'),
+    ).toBe(false);
+    expect(
+      hasPermission({ role: 'admin', permissions: [] }, 'approve_commerceops'),
+    ).toBe(true);
+  });
+});
+
+describe('mounted approval route', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  test.each([
+    ['anonymous', '', 401],
+    ['member', '', 403],
+    ['member', '?workspace_id=elsewhere', 403],
+    ['approver', '?workspace_id=elsewhere', 403],
+    ['approver', '', 200],
+  ] as const)('%s approval %s returns %i', async (actor, query, status) => {
+    vi.stubEnv('COMMERCEOPS_SIGNING_SECRET', 'route-test-only-secret');
+    const upstream = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ status: 'executed' }));
+    vi.stubGlobal('fetch', upstream);
+    const token = 'test-session';
+    vi.spyOn(context, 'getCachedSessionWithUser').mockReturnValue({
+      user_id: 'one',
+      username: actor,
+      status: 'active',
+      role: 'member',
+      permissions: actor === 'approver' ? ['approve_commerceops'] : [],
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    } as NonNullable<ReturnType<typeof context.getCachedSessionWithUser>>);
+    vi.spyOn(db, 'getUserHomeGroup').mockReturnValue({
+      folder: 'home-one',
+    } as NonNullable<ReturnType<typeof db.getUserHomeGroup>>);
+    vi.spyOn(db, 'getJidsByFolder').mockReturnValue(['web:other']);
+    vi.spyOn(db, 'getRegisteredGroup').mockReturnValue({
+      folder: 'elsewhere',
+      jid: 'web:other',
+      is_home: true,
+      created_by: 'other',
+    } as NonNullable<ReturnType<typeof db.getRegisteredGroup>>);
+    vi.spyOn(db, 'updateSessionLastActive').mockImplementation(() => {});
+    const app = new Hono().route('/api/commerceops', routes);
+    const headers = new Headers({ 'content-type': 'application/json' });
+    if (actor !== 'anonymous')
+      headers.set('cookie', 'miniclaw_session=' + signSessionToken(token));
+    const response = await app.request(
+      'https://example.org/api/commerceops/api/v1/drafts/d1/approve-and-execute' +
+        query,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          approver: 'owner',
+          workspace_id: 'elsewhere',
+          note: 'review',
+        }),
+      },
     );
-    expect(hasPermission({ role: 'admin', permissions: [] }, 'approve_commerceops')).toBe(
-      true,
-    );
+    expect(response.status).toBe(status);
+    if (status === 200) {
+      expect(upstream).toHaveBeenCalledTimes(1);
+      const [, init] = upstream.mock.calls[0];
+      expect(
+        JSON.parse(new TextDecoder().decode(init?.body as ArrayBuffer)),
+      ).toEqual({ note: 'review' });
+      expect(
+        new Headers(init?.headers).get('x-commerceops-identity'),
+      ).toContain('"workspace_id":"home-one"');
+    } else {
+      expect(upstream).not.toHaveBeenCalled();
+      if (status === 403)
+        expect((await response.json()).code).toBe(
+          query ? 'workspace_forbidden' : 'approval_forbidden',
+        );
+    }
   });
 });

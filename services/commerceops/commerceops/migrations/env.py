@@ -18,8 +18,11 @@ def run_migrations_online() -> None:
     connectable = engine_from_config(section, prefix="sqlalchemy.", poolclass=pool.NullPool)
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata, render_as_batch=True)
+        if connection.dialect.name == "sqlite":
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
         with context.begin_transaction():
             context.run_migrations()
+        connection.commit()
 
 
 run_migrations_online()

@@ -4,9 +4,26 @@ import { EmptyState } from '@/components/common/EmptyState';
 import { type Scorecard, commerce, errorText } from './api';
 import { useCommerceConnection } from './connection';
 
+type AgentCard = {
+  model?: string;
+  cases: {
+    case_id: number | string;
+    status: string;
+    failure_reason?: string;
+  }[];
+  summary?: {
+    called: number;
+    passed: number;
+    skipped: number;
+    total_tokens: number;
+  };
+};
+
 export function CommerceEvalPage() {
   const { online, epoch } = useCommerceConnection();
   const [scorecard, setScorecard] = useState<Scorecard | null>(null);
+  const [live, setLive] = useState<AgentCard | null>(null);
+  const [scripted, setScripted] = useState<AgentCard | null>(null);
   const [missing, setMissing] = useState(false);
   const [offline, setOffline] = useState(false);
   const [message, setMessage] = useState('');
@@ -15,10 +32,14 @@ export function CommerceEvalPage() {
   const load = useCallback(async () => {
     setMessage('');
     try {
-      const body = await commerce<{ scorecard: Scorecard | null }>(
-        '/api/v1/evals/latest',
-      );
+      const body = await commerce<{
+        scorecard: Scorecard | null;
+        scripted: AgentCard | null;
+        live: AgentCard | null;
+      }>('/api/v1/evals/latest');
       setScorecard(body.scorecard);
+      setLive(body.live);
+      setScripted(body.scripted);
       setMissing(body.scorecard == null);
       setOffline(false);
     } catch (error) {
@@ -57,9 +78,41 @@ export function CommerceEvalPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      {(
+        [
+          ['Live LLM Agent Evaluation', live],
+          ['Scripted Agent Integration Evaluation', scripted],
+        ] as const
+      ).map(([title, card]) => (
+        <section key={title} className="rounded-xl border border-border p-4">
+          <h2 className="font-medium">{title}</h2>
+          {card ? (
+            <>
+              {card.summary && (
+                <p>
+                  {card.model} · 实际调用 {card.summary.called} 个案例 · 跳过{' '}
+                  {card.summary.skipped} · {card.summary.total_tokens} tokens
+                  {card.summary.called > 0 &&
+                    ` · 通过 ${card.summary.passed}/${card.summary.called}`}
+                </p>
+              )}
+              <ul>
+                {card.cases.map((item) => (
+                  <li key={item.case_id}>
+                    {item.case_id} · {item.status} {item.failure_reason}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p>尚无评测记录</p>
+          )}
+        </section>
+      ))}
+      <h2 className="font-medium">Deterministic Engine Evaluation</h2>
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={() => void run()} disabled={running || paused}>
-          {running ? '正在评测' : '运行评测'}
+          {running ? '正在评测' : '运行确定性评测'}
         </Button>
         <Button
           variant="outline"
@@ -94,7 +147,8 @@ export function CommerceEvalPage() {
             </h2>
             <p className="mt-2 text-sm text-muted-foreground">
               规划估算运营时间 {scorecard.summary.ops_minutes_saved}{' '}
-              分钟，不是实测节省。实测模型 token {scorecard.summary.measured_model_tokens}
+              分钟，不是实测节省。实测模型 token{' '}
+              {scorecard.summary.measured_model_tokens}
               。若只由模型转述工具结果，上限{' '}
               {scorecard.summary.estimated_relay_tokens} token。
             </p>

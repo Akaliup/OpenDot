@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import date
 import os
+import json
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -300,7 +302,19 @@ def create_app(database_url: str | None = None) -> FastAPI:
 
     @app.get("/api/v1/evals/latest")
     def latest_eval() -> dict:
-        return {"scorecard": load_latest()}
+        bundled = Path(__file__).resolve().parents[2] / "evals"
+        bundled = Path(os.environ.get("COMMERCEOPS_BUNDLED_EVAL_DIR", bundled))
+        directory = Path(os.environ.get("COMMERCEOPS_EVAL_DIR", bundled))
+
+        def read_card(name: str):
+            for base in (directory, bundled):
+                path = base / name
+                if path.is_file():
+                    return json.loads(path.read_text(encoding="utf8"))
+            return None
+
+        return {"scorecard": load_latest(), "scripted": read_card("scripted_scorecard.json"),
+                "live": read_card("live_llm_scorecard.json")}
 
     @app.get("/api/v1/drafts/{draft_id}")
     def draft(draft_id: str, session: Session = Depends(get_session)) -> dict:

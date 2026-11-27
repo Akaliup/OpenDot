@@ -3,6 +3,7 @@
 READ_TOOLS = (
     "commerceops_list_stores",
     "commerceops_profit_report",
+    "commerceops_order_summary",
     "commerceops_ads_diagnosis",
     "commerceops_inventory_risk",
     "commerceops_supplier_comparison",

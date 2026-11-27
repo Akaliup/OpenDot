@@ -68,6 +68,15 @@ def list_stores(session: Session) -> dict:
     }
 
 
+def order_summary(session: Session, store_code: str, start: date, end: date) -> dict:
+    store = _store(session, store_code)
+    _window(start, end)
+    rows = _orders(session, store.id, start, end)
+    return {"store_code": store.code, "start": start, "end": end,
+            "orders": len({row.external_order_id for row in rows}),
+            "units": sum(row.quantity for row in rows)}
+
+
 def profit_report(session: Session, store_code: str, start: date, end: date, compare: bool = True) -> dict:
     store = _store(session, store_code)
     _window(start, end)

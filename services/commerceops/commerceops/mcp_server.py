@@ -30,6 +30,7 @@ from commerceops.reporting import (
     inventory_report,
     list_stores,
     price_simulation,
+    order_summary,
     profit_report,
     supplier_report,
 )
@@ -113,6 +114,13 @@ def commerceops_profit_report(store_code: str, start_date: str, end_date: str, c
     start, end = _day(start_date), _day(end_date)
     with session_scope() as session:
         return _guard(lambda: profit_report(session, store_code, start, end, compare_previous))
+
+
+@mcp.tool(name="commerceops_order_summary", annotations=_READ, structured_output=False)
+def commerceops_order_summary(store_code: str, start_date: str, end_date: str) -> str:
+    """Order count and units for this workspace, store and inclusive date range."""
+    with session_scope() as session:
+        return _guard(lambda: order_summary(session, store_code, _day(start_date), _day(end_date)))
 
 
 @mcp.tool(name="commerceops_ads_diagnosis", annotations=_READ, structured_output=False)
