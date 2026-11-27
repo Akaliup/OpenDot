@@ -9,6 +9,7 @@ import {
   Target,
   Users,
   Brain,
+  LineChart,
 } from 'lucide-react';
 import { BOT_FIRST_HOME_ENABLED } from '../../utils/bot-first';
 
@@ -103,6 +104,7 @@ export function advancedNavItems(
       ),
     ),
     { path: '/memory', icon: Brain, label: '记忆' },
+    { path: '/commerce', icon: LineChart, label: '经营' },
     ...(goalsEnabled
       ? [{ path: '/tasks', icon: Clock4, label: '定时任务' }]
       : []),

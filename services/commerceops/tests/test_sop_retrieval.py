@@ -19,6 +19,8 @@ def test_control_codes_cite_the_exact_section_and_quote():
         assert hit.doc_id == doc_id
         assert hit.section == section
         assert code in hit.quote
+        if code == "acossevere":
+            assert "0.80" in hit.quote
         assert hit.quote in documents[doc_id]
         assert hit.source_sha256
         assert first["formula_version"] == "sop.bm25.v1"

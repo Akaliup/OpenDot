@@ -244,23 +244,29 @@ is the fail-closed check: without an approval row it returns 409
 `unapproved_execution` and still appends an audit entry. The MCP server does
 not expose that call.
 
-## Phase 2
+## OpenDot wiring
 
-1. Register `commerceops-mcp` as a user stdio server through the existing MCP
-   settings. Pass `COMMERCEOPS_DATABASE_URL` in the server env.
-2. Add one skill that tells the agent to call these tools, quote SOP
-   citations, and never invent a profit or ACOS figure. Do not add seven
-   specialist agents.
-3. Add three React pages that read the FastAPI reports through an OpenDot
-   route. Follow `DESIGN.md`. Do not point the browser at port 8077.
-4. Let Feishu and the existing approval ledger deliver the draft. The model
-   stops at draft creation. The human approval calls
-   `approve_and_execute_draft`.
-5. Add an eval bench with scripted tool traces for the four seeded anomalies,
-   including a case where the model is not allowed to approve its own draft.
+Logged-in requests to `/api/commerceops/*` are proxied by
+`src/routes/commerceops.ts` to `COMMERCEOPS_API_URL` (default
+`http://127.0.0.1:8077`). If that process is down the proxy returns 503
+`commerceops_offline`. `GET /api/commerceops/meta` stays inside OpenDot and
+returns the stdio preset. Saving that preset is a separate MCP settings
+action; existing server entries are not rewritten.
+
+The project skill is `container/skills/commerceops/SKILL.md`. It requires tool
+numbers, SOP quotes, and a stop at draft creation. The pages live at
+`/commerce`, `/commerce/approvals`, and `/commerce/evals`.
+
+Feishu cards are sent only when `FEISHU_WEBHOOK_URL` is set. Otherwise the
+same card is a dry-run record on `GET /api/v1/notifications`. The eval bench
+in `services/commerceops/commerceops/evals/bench.py` runs ten tool-contract
+cases and writes `scorecard.json` plus `scorecard.html`. `GET /api/v1/evals/latest`
+reads that file.
+
+The click-through script is [commerceops-demo-runbook.md](commerceops-demo-runbook.md).
 
 ## Local check
 
-From `services/commerceops`, `pytest` covers seed and CSV upserts, the four
-engines including zero-denominator cases, SOP citations, the approval gate,
-and FastAPI plus MCP tool listing over stdio.
+From `services/commerceops`, `pytest` covers the engines, seed and CSV
+upserts, SOP citations, the approval gate, FastAPI, MCP stdio, the Feishu
+dry run, and the eval scorecard.

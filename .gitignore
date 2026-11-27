@@ -86,6 +86,8 @@ __pycache__/
 *.py[cod]
 .venv/
 *.egg-info/
+commerceops-notifications.jsonl
+commerceops-evals/
 
 /log/
 nohup.out

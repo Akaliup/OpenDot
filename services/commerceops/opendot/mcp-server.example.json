@@ -1,0 +1,9 @@
+{
+  "id": "commerceops",
+  "command": "commerceops-mcp",
+  "args": [],
+  "description": "Deterministic CommerceOps tools. Draft tools do not change budgets, purchase orders, or competitor snapshots.",
+  "env": {
+    "COMMERCEOPS_DATABASE_URL": "sqlite:///./services/commerceops/commerceops.db"
+  }
+}

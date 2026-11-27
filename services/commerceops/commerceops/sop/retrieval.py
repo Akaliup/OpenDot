@@ -21,7 +21,8 @@ _DOCS_DIR = Path(__file__).resolve().parent / "docs"
 _TOKEN = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 _CJK = re.compile(r"[\u4e00-\u9fff]+")
 _HEADING = re.compile(r"^## (.+)$", re.MULTILINE)
-_SENTENCE = re.compile(r"[^.。\n]+[.。]?")
+# A dot between digits is a decimal, not a sentence boundary.
+_SENTENCE = re.compile(r"[^.。\n]+(?:\.\d+[^.。\n]*)*[.。]?")
 
 STOPWORDS = frozenset(
     {

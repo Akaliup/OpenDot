@@ -125,7 +125,7 @@ def execute_draft(session: Session, draft_id: str, actor: str) -> dict:
     if draft.status == "executed":
         _audit(session, draft, "replay_noop", actor, {"reason": "already_executed"})
         session.commit()
-        return _result(draft, replayed=True)
+        return _emit("replay_noop", _result(draft, replayed=True))
     if draft.status == "rejected":
         _audit(session, draft, "execution_rejected", actor, {"reason": "draft_rejected"})
         session.commit()
@@ -144,7 +144,7 @@ def approve_and_execute_draft(session: Session, draft_id: str, approver: str, no
     if draft.status == "executed":
         _audit(session, draft, "replay_noop", approver, {"reason": "already_executed"})
         session.commit()
-        return _result(draft, replayed=True)
+        return _emit("replay_noop", _result(draft, replayed=True))
     if draft.status != "draft":
         _audit(session, draft, "execution_rejected", approver, {"reason": draft.status})
         session.commit()
@@ -204,7 +204,14 @@ def reject_draft(session: Session, draft_id: str, approver: str, note: str = "")
     draft.status = "rejected"
     _audit(session, draft, "draft_rejected", approver, {"approval_id": approval.id})
     session.commit()
-    return _result(draft, replayed=False)
+    return _emit("draft_rejected", _result(draft, replayed=False))
+
+
+def list_drafts(session: Session, status: str | None = None) -> dict:
+    query = select(ActionDraft).order_by(ActionDraft.created_at.desc(), ActionDraft.id.desc())
+    if status:
+        query = query.where(ActionDraft.status == status)
+    return {"drafts": [_summary(row) for row in session.scalars(query).all()]}
 
 
 def get_draft(session: Session, draft_id: str) -> dict:
@@ -301,7 +308,7 @@ def _create(
     session.commit()
     result = _result(draft, replayed=False)
     result["created"] = True
-    return result
+    return _emit("draft_created", result)
 
 
 def _apply_and_commit(session: Session, draft: ActionDraft, actor: str) -> dict:
@@ -313,7 +320,7 @@ def _apply_and_commit(session: Session, draft: ActionDraft, actor: str) -> dict:
         _audit(session, draft, "executed", actor, {"execution_ref": ref})
         result = _result(draft, replayed=False)
         session.commit()
-        return result
+        return _emit("draft_executed", result)
     except Exception:
         session.rollback()
         raise
@@ -429,6 +436,34 @@ def _audit(session: Session, draft: ActionDraft, event: str, actor: str, detail:
             created_at=utc_now(),
         )
     )
+
+
+def _emit(event: str, payload: dict) -> dict:
+    try:
+        from commerceops.notify import notify_draft
+
+        notify_draft(event, payload)
+    except Exception:
+        import logging
+
+        logging.getLogger("commerceops").warning("commerceops notification failed", exc_info=True)
+    return payload
+
+
+def _summary(draft: ActionDraft) -> dict:
+    payload = json.loads(draft.payload_json)
+    return {
+        "draft_id": draft.id,
+        "action_type": draft.action_type,
+        "status": draft.status,
+        "formula_version": draft.formula_version,
+        "created_by": draft.created_by,
+        "created_at": draft.created_at,
+        "executed_at": draft.executed_at,
+        "execution_ref": draft.execution_ref,
+        "decision": payload.get("decision"),
+        "evidence": payload.get("evidence"),
+    }
 
 
 def _result(draft: ActionDraft, *, replayed: bool) -> dict:

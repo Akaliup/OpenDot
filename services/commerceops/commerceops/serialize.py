@@ -14,6 +14,8 @@ def to_jsonable(value: Any) -> Any:
     if isinstance(value, float):
         raise TypeError("refusing to serialize a float; use Decimal")
     if isinstance(value, Decimal):
+        if value == 0:
+            return "0"
         return format(value, "f")
     if isinstance(value, datetime):
         return value.isoformat()

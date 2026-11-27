@@ -11,8 +11,11 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from commerceops.alerts import anomaly_brief
 from commerceops.csv_import import import_rows, read_table
 from commerceops.db import session_factory_for
+from commerceops.evals.bench import load_latest, run_bench
+from commerceops.notify import notify_anomalies, recent_notifications
 from commerceops.engines.catalog import FORMULA_VERSIONS, FORMULAS
 from commerceops.errors import CommerceOpsError
 from commerceops.governance import (
@@ -23,6 +26,7 @@ from commerceops.governance import (
     execute_draft,
     get_draft,
     list_audit,
+    list_drafts,
     reject_draft,
 )
 from commerceops.reporting import (
@@ -221,6 +225,28 @@ def create_app(database_url: str | None = None) -> FastAPI:
             return to_jsonable(search_sops(q, limit))
         except ValueError as exc:
             raise CommerceOpsError(str(exc), code="invalid_query", status_code=422) from exc
+
+    @app.get("/api/v1/drafts")
+    def drafts(status: str | None = None, session: Session = Depends(get_session)) -> dict:
+        return to_jsonable(list_drafts(session, status))
+
+    @app.get("/api/v1/notifications")
+    def notifications() -> dict:
+        return {"notifications": recent_notifications()}
+
+    @app.post("/api/v1/notifications/anomalies")
+    def anomalies(store_code: str, session: Session = Depends(get_session)) -> dict:
+        brief = anomaly_brief(session, store_code)
+        notice = notify_anomalies(to_jsonable(brief)) if brief["alerts"] else None
+        return to_jsonable({"brief": brief, "notification": notice})
+
+    @app.post("/api/v1/evals/run")
+    def run_evals() -> dict:
+        return run_bench()
+
+    @app.get("/api/v1/evals/latest")
+    def latest_eval() -> dict:
+        return {"scorecard": load_latest()}
 
     @app.get("/api/v1/drafts/{draft_id}")
     def draft(draft_id: str, session: Session = Depends(get_session)) -> dict:
