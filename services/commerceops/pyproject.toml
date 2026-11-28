@@ -32,7 +32,7 @@ where = ["."]
 include = ["commerceops*"]
 
 [tool.setuptools.package-data]
-commerceops = ["sop/docs/*.md"]
+commerceops = ["sop/docs/*.md", "alembic.ini"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

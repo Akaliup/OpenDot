@@ -51,8 +51,9 @@ def create_ad_budget_draft(
     end: date,
     created_by: str,
     idempotency_key: str | None = None,
+    reduction_percent: int | None = None,
 ) -> dict:
-    decision, evidence = budget_decision(session, store_code, campaign_external_id, start, end)
+    decision, evidence = budget_decision(session, store_code, campaign_external_id, start, end, reduction_percent)
     return _create(
         session,
         action_type="ad_budget_adjustment",
@@ -433,6 +434,7 @@ def _recompute(session: Session, draft: ActionDraft) -> dict:
             decision["campaign_external_id"],
             date.fromisoformat(payload["start_date"]),
             date.fromisoformat(payload["end_date"]),
+            decision.get("reduction_percent"),
         )
         return fresh
     if draft.action_type == "purchase_order":

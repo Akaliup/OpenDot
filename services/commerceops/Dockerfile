@@ -21,6 +21,9 @@ ENV PYTHONUNBUFFERED=1 \
     COMMERCEOPS_NOTIFY_LOG=/data/notifications.jsonl \
     COMMERCEOPS_EVAL_DIR=/data/evals
 
+COPY evals/*scorecard.json /opt/commerceops/evals/
+ENV COMMERCEOPS_BUNDLED_EVAL_DIR=/opt/commerceops/evals
+
 USER commerceops
 WORKDIR /data
 EXPOSE 8077

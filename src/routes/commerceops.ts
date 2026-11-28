@@ -4,7 +4,11 @@
  */
 import { createHmac } from 'node:crypto';
 import { Hono } from 'hono';
-import { getJidsByFolder, getRegisteredGroup, getUserHomeGroup } from '../db.js';
+import {
+  getJidsByFolder,
+  getRegisteredGroup,
+  getUserHomeGroup,
+} from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { hasPermission } from '../permissions.js';
 import type { AuthUser } from '../types.js';
@@ -20,9 +24,6 @@ export const COMMERCEOPS_MCP_PRESET = {
   args: [] as string[],
   description:
     'Deterministic CommerceOps tools. Draft tools do not change budgets, purchase orders, or competitor snapshots.',
-  env: {
-    COMMERCEOPS_DATABASE_URL: 'sqlite:///./services/commerceops/commerceops.db',
-  },
 };
 
 export interface ForwardInput {
@@ -193,27 +194,6 @@ const commerceopsRoutes = new Hono<{ Variables: Variables }>();
 
 commerceopsRoutes.use('*', authMiddleware);
 
-commerceopsRoutes.get('/meta', async (c) => {
-  const baseUrl = commerceOpsBaseUrl();
-  const health = await forwardCommerceOps({
-    method: 'GET',
-    path: '/health',
-    search: '',
-    baseUrl,
-    timeoutMs: 2_000,
-  });
-  return c.json({
-    online: health.status === 200,
-    api_url: baseUrl,
-    mcp_preset: COMMERCEOPS_MCP_PRESET,
-    skill: {
-      id: 'commerceops',
-      name: 'CommerceOps',
-      path: 'container/skills/commerceops/SKILL.md',
-    },
-  });
-});
-
 commerceopsRoutes.all('/*', async (c) => {
   const user = c.get('user');
   const secret = commerceSigningSecret();
@@ -260,7 +240,7 @@ commerceopsRoutes.all('/*', async (c) => {
       : stripUntrustedCommerceBody(await c.req.arrayBuffer(), contentType);
   const result = await forwardCommerceOps({
     method,
-    path,
+    path: path === '/meta' && method === 'GET' ? '/api/v1/stores' : path,
     search: url.search,
     body,
     contentType,
@@ -277,6 +257,25 @@ commerceopsRoutes.all('/*', async (c) => {
       ),
     },
   });
+  if (path === '/meta' && method === 'GET' && result.status === 200) {
+    return c.json({
+      online: true,
+      stores: JSON.parse(result.body).stores,
+      workspace_id: workspaceId,
+      api_url: commerceOpsBaseUrl(),
+      mcp_preset: {
+        ...COMMERCEOPS_MCP_PRESET,
+        env: {
+          COMMERCEOPS_WORKSPACE_ID: workspaceId,
+        },
+      },
+      skill: {
+        id: 'commerceops',
+        name: 'CommerceOps',
+        path: 'container/skills/commerceops/SKILL.md',
+      },
+    });
+  }
   return new Response(result.body, {
     status: result.status,
     headers: { 'content-type': result.contentType },

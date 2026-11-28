@@ -25,11 +25,12 @@ from commerceops.governance import (
     create_purchase_order_draft,
 )
 from commerceops.reporting import (
-    ads_report,
+    ads_report, budget_decision,
     competitor_report,
     inventory_report,
     list_stores,
     price_simulation,
+    order_summary,
     profit_report,
     supplier_report,
 )
@@ -115,6 +116,13 @@ def commerceops_profit_report(store_code: str, start_date: str, end_date: str, c
         return _guard(lambda: profit_report(session, store_code, start, end, compare_previous))
 
 
+@mcp.tool(name="commerceops_order_summary", annotations=_READ, structured_output=False)
+def commerceops_order_summary(store_code: str, start_date: str, end_date: str) -> str:
+    """Order count and units for this workspace, store and inclusive date range."""
+    with session_scope() as session:
+        return _guard(lambda: order_summary(session, store_code, _day(start_date), _day(end_date)))
+
+
 @mcp.tool(name="commerceops_ads_diagnosis", annotations=_READ, structured_output=False)
 def commerceops_ads_diagnosis(store_code: str, start_date: str, end_date: str) -> str:
     """ACOS, ROAS, TACOS, CTR, CVR, and the budget ladder. Does not change a budget."""
@@ -185,6 +193,15 @@ def generate_weekly_report_tool(
         )
 
 
+@mcp.tool(name="simulate_ad_budget_reduction", annotations=_READ, structured_output=False)
+def simulate_ad_budget_reduction(store_code: str, campaign_external_id: str, start_date: str,
+                                  end_date: str, reduction_percent: int) -> str:
+    """Model a lower daily budget cap for a flagged campaign. Sales and spend are not forecasts."""
+    with session_scope() as session:
+        return _guard(lambda: {"scenario": budget_decision(session, store_code, campaign_external_id,
+                      _day(start_date), _day(end_date), reduction_percent)[0], "forecast": False})
+
+
 @mcp.tool(name="commerceops_create_ad_budget_draft", annotations=_DRAFT, structured_output=False)
 def commerceops_create_ad_budget_draft(
     store_code: str,
@@ -193,6 +210,7 @@ def commerceops_create_ad_budget_draft(
     end_date: str,
     created_by: str = "agent",
     idempotency_key: str = "",
+    reduction_percent: int | None = None,
 ) -> str:
     """Store an ad-budget draft. Does not change the campaign's daily budget."""
     start, end = _day(start_date), _day(end_date)
@@ -206,6 +224,7 @@ def commerceops_create_ad_budget_draft(
                 end=end,
                 created_by=_mcp_actor(created_by),
                 idempotency_key=idempotency_key or None,
+                reduction_percent=reduction_percent,
             )
         )
 

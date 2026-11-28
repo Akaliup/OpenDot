@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import date
 import os
+import json
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -35,6 +37,7 @@ from commerceops.reporting import (
     ads_report,
     competitor_report,
     inventory_report,
+    dashboard_report,
     list_stores,
     price_simulation,
     profit_report,
@@ -168,6 +171,10 @@ def create_app(database_url: str | None = None) -> FastAPI:
     def stores(session: Session = Depends(get_session)) -> dict:
         return to_jsonable(list_stores(session))
 
+    @app.get("/api/v1/dashboard")
+    def dashboard(store_code: str, start_date: date, end_date: date, session: Session = Depends(get_session)) -> dict:
+        return to_jsonable(dashboard_report(session, store_code, start_date, end_date))
+
     @app.get("/api/v1/profit")
     def profit(
         store_code: str,
@@ -300,7 +307,19 @@ def create_app(database_url: str | None = None) -> FastAPI:
 
     @app.get("/api/v1/evals/latest")
     def latest_eval() -> dict:
-        return {"scorecard": load_latest()}
+        bundled = Path(__file__).resolve().parents[2] / "evals"
+        bundled = Path(os.environ.get("COMMERCEOPS_BUNDLED_EVAL_DIR", bundled))
+        directory = Path(os.environ.get("COMMERCEOPS_EVAL_DIR", bundled))
+
+        def read_card(name: str):
+            for base in (directory, bundled):
+                path = base / name
+                if path.is_file():
+                    return json.loads(path.read_text(encoding="utf8"))
+            return None
+
+        return {"scorecard": load_latest(), "scripted": read_card("scripted_scorecard.json"),
+                "live": read_card("live_llm_scorecard.json")}
 
     @app.get("/api/v1/drafts/{draft_id}")
     def draft(draft_id: str, session: Session = Depends(get_session)) -> dict:

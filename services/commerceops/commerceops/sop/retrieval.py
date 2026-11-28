@@ -138,7 +138,7 @@ def load_package_documents() -> list[SopSource]:
     documents: list[SopSource] = []
     for path in sorted(_DOCS_DIR.glob("*.md")):
         raw = path.read_bytes()
-        text = raw.decode("utf-8")
+        text = raw.decode("utf-8").replace("\r\n", "\n")
         meta, body = _parse_frontmatter(text)
         documents.append(
             SopSource(

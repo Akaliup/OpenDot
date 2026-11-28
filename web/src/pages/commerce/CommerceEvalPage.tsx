@@ -1,12 +1,32 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/common/EmptyState';
-import { type Scorecard, commerce, errorText } from './api';
+import { type Scorecard, CommerceOffline, commerce, errorText } from './api';
 import { useCommerceConnection } from './connection';
+
+type AgentCard = {
+  model?: string;
+  cases: {
+    case_id: number | string;
+    status: string;
+    failure_reason?: string;
+    latency_ms?: number;
+    actual_model_call?: boolean;
+    model_calls?: number;
+  }[];
+  summary?: {
+    called: number;
+    passed: number;
+    skipped: number;
+    total_tokens: number;
+  };
+};
 
 export function CommerceEvalPage() {
   const { online, epoch } = useCommerceConnection();
   const [scorecard, setScorecard] = useState<Scorecard | null>(null);
+  const [live, setLive] = useState<AgentCard | null>(null);
+  const [scripted, setScripted] = useState<AgentCard | null>(null);
   const [missing, setMissing] = useState(false);
   const [offline, setOffline] = useState(false);
   const [message, setMessage] = useState('');
@@ -15,14 +35,18 @@ export function CommerceEvalPage() {
   const load = useCallback(async () => {
     setMessage('');
     try {
-      const body = await commerce<{ scorecard: Scorecard | null }>(
-        '/api/v1/evals/latest',
-      );
+      const body = await commerce<{
+        scorecard: Scorecard | null;
+        scripted: AgentCard | null;
+        live: AgentCard | null;
+      }>('/api/v1/evals/latest');
       setScorecard(body.scorecard);
+      setLive(body.live);
+      setScripted(body.scripted);
       setMissing(body.scorecard == null);
       setOffline(false);
     } catch (error) {
-      setOffline(true);
+      setOffline(error instanceof CommerceOffline);
       setMessage(errorText(error));
     }
   }, []);
@@ -57,9 +81,75 @@ export function CommerceEvalPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      {(
+        [
+          ['DeepSeek Live LLM Evaluation', live],
+          ['Scripted Agent Integration Evaluation', scripted],
+        ] as const
+      ).map(([title, card]) => (
+        <section key={title} className="rounded-xl border border-border p-4">
+          <h2 className="font-medium">{title}</h2>
+          {card ? (
+            <>
+              <p>
+                总数 {card.cases.length} · 通过{' '}
+                {card.cases.filter((c) => c.status === 'passed').length} · 失败{' '}
+                {
+                  card.cases.filter((c) =>
+                    ['failed', 'failure', 'error'].includes(c.status),
+                  ).length
+                }{' '}
+                · 跳过 {card.cases.filter((c) => c.status === 'skipped').length}
+              </p>
+              {card.summary?.called === 0 && (
+                <p>真实模型未运行 · 调用 0 次 · 平均响应时间 —</p>
+              )}
+              {!card.summary && (
+                <p>脚本化测试 · 模型调用 0 次 · 0 tokens · 未记录耗时</p>
+              )}
+              {card.summary && card.summary.called > 0 && (
+                <p>
+                  模型调用{' '}
+                  {card.cases
+                    .filter((c) => c.actual_model_call)
+                    .every((c) => c.model_calls != null)
+                    ? card.cases.reduce((n, c) => n + (c.model_calls ?? 0), 0)
+                    : '未记录'}{' '}
+                  次 · 平均案例耗时{' '}
+                  {Math.round(
+                    card.cases
+                      .filter((c) => c.actual_model_call)
+                      .reduce((n, c) => n + (c.latency_ms ?? 0), 0) /
+                      card.summary.called,
+                  )}{' '}
+                  ms
+                </p>
+              )}
+              {card.summary && (
+                <p>
+                  {card.model} · 实际调用 {card.summary.called} 个案例 · 跳过{' '}
+                  {card.summary.skipped} · {card.summary.total_tokens} tokens
+                  {card.summary.called > 0 &&
+                    ` · 通过 ${card.summary.passed}/${card.summary.called}`}
+                </p>
+              )}
+              <ul>
+                {card.cases.map((item) => (
+                  <li key={item.case_id}>
+                    {item.case_id} · {item.status} {item.failure_reason}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p>尚无评测记录</p>
+          )}
+        </section>
+      ))}
+      <h2 className="font-medium">Deterministic Engine Evaluation</h2>
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={() => void run()} disabled={running || paused}>
-          {running ? '正在评测' : '运行评测'}
+          {running ? '正在评测' : '运行确定性评测'}
         </Button>
         <Button
           variant="outline"
@@ -87,20 +177,20 @@ export function CommerceEvalPage() {
             aria-label="评测汇总"
           >
             <h2 className="text-sm font-medium">
-              {scorecard.summary.passed}/{scorecard.summary.cases} 通过
-              {scorecard.summary.failed > 0
-                ? `，${scorecard.summary.failed} 失败`
-                : ''}
+              总数 {scorecard.summary.cases} · 通过 {scorecard.summary.passed} · 失败 {scorecard.summary.failed} ·
+              跳过 {scorecard.summary.cases - scorecard.summary.passed - scorecard.summary.failed}
             </h2>
             <p className="mt-2 text-sm text-muted-foreground">
               规划估算运营时间 {scorecard.summary.ops_minutes_saved}{' '}
-              分钟，不是实测节省。实测模型 token {scorecard.summary.measured_model_tokens}
+              分钟，不是实测节省。实测模型 token{' '}
+              {scorecard.summary.measured_model_tokens}
               。若只由模型转述工具结果，上限{' '}
               {scorecard.summary.estimated_relay_tokens} token。
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
               {scorecard.summary.token_note}
             </p>
+            <p className="text-sm text-muted-foreground">模型调用 0 次 · 未记录平均耗时</p>
             <p className="mt-1 text-xs text-muted-foreground">
               生成于 {scorecard.generated_at}
             </p>

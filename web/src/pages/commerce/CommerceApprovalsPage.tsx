@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useAuthStore } from '../../stores/auth';
+import { CommerceOffline } from './api';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/common/EmptyState';
 import { type AuditEntry, type DraftRow, commerce, errorText } from './api';
@@ -29,7 +32,13 @@ function decisionText(draft: DraftRow): string {
 
 export function CommerceApprovalsPage() {
   const { online, epoch } = useCommerceConnection();
+  const canApprove = useAuthStore((s) =>
+    s.hasPermission('approve_commerceops'),
+  );
+  const [status, setStatus] = useState('all');
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
+  const [params] = useSearchParams();
+  const requested = params.get('draft');
   const [selected, setSelected] = useState<string | null>(null);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [message, setMessage] = useState('');
@@ -45,13 +54,13 @@ export function CommerceApprovalsPage() {
       setSelected((current) =>
         current && body.drafts.some((draft) => draft.draft_id === current)
           ? current
-          : (body.drafts[0]?.draft_id ?? null),
+          : (body.drafts.find((draft) => draft.draft_id === requested)?.draft_id ?? body.drafts[0]?.draft_id ?? null),
       );
     } catch (error) {
-      setOffline(true);
+      setOffline(error instanceof CommerceOffline);
       setMessage(errorText(error));
     }
-  }, []);
+  }, [requested]);
 
   useEffect(() => {
     void load();
@@ -62,9 +71,12 @@ export function CommerceApprovalsPage() {
       setAudit([]);
       return;
     }
-    void commerce<{ entries: AuditEntry[] }>(`/api/v1/drafts/${selected}/audit`)
-      .then((body) => setAudit(body.entries))
-      .catch((error) => setMessage(errorText(error)));
+    let active = true;
+    setAudit([]);
+    void commerce<{ entries: AuditEntry[] }>(`/api/v1/drafts/${encodeURIComponent(selected)}/audit`)
+      .then((body) => { if (active) setAudit(body.entries); })
+      .catch((error) => { if (active) setMessage(errorText(error)); });
+    return () => { active = false; };
   }, [selected]);
 
   async function decide(kind: 'approve-and-execute' | 'reject') {
@@ -115,30 +127,60 @@ export function CommerceApprovalsPage() {
     <div className="grid gap-6 lg:grid-cols-[18rem_1fr]">
       <section aria-label="草案列表">
         <h2 className="text-sm font-medium">草案 {pending.length} 条待处理</h2>
+        <label>
+          状态{' '}
+          <select
+            value={status}
+            onChange={(e) => {
+              setStatus(e.target.value);
+              setSelected(
+                drafts.find(
+                  (d) =>
+                    e.target.value === 'all' || d.status === e.target.value,
+                )?.draft_id ?? null,
+              );
+            }}
+          >
+            {Object.entries({
+              all: '全部',
+              draft: '待审批',
+              approved: '已批准',
+              rejected: '已拒绝',
+              executed: '已执行',
+            }).map(([v, t]) => (
+              <option key={v} value={v}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </label>
+        {message && !selected && <p role="status">{message}</p>}
         <ul className="mt-3 flex flex-col gap-2">
           {drafts.length === 0 && (
             <li className="text-sm text-muted-foreground">
               还没有草案。让智能体创建，或从概览看到异常后再生成。
             </li>
           )}
-          {drafts.map((draft) => (
-            <li key={draft.draft_id}>
-              <button
-                type="button"
-                className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${
-                  draft.draft_id === selected
-                    ? 'border-primary bg-card'
-                    : 'border-border'
-                }`}
-                onClick={() => setSelected(draft.draft_id)}
-              >
-                <span className="block">{draft.action_type}</span>
-                <span className="text-muted-foreground">
-                  {draft.status} · {draft.created_at}
-                </span>
-              </button>
-            </li>
-          ))}
+          {drafts
+            .filter((d) => status === 'all' || d.status === status)
+            .map((draft) => (
+              <li key={draft.draft_id}>
+                <button
+                  type="button"
+                  className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${
+                    draft.draft_id === selected
+                      ? 'border-primary bg-card'
+                      : 'border-border'
+                  }`}
+                  onClick={() => setSelected(draft.draft_id)}
+                >
+                  <span className="block">{draft.action_type}</span>
+                  <span className="text-muted-foreground">
+                    {draft.status} · {draft.created_at}
+                  </span>
+                </button>
+              </li>
+            ))}
         </ul>
       </section>
       <section
@@ -156,10 +198,22 @@ export function CommerceApprovalsPage() {
             <pre className="mt-3 whitespace-pre-wrap text-sm">
               {decisionText(current)}
             </pre>
+            <p className="mt-2 text-sm">
+              创建于 {current.created_at} · 操作者 {current.created_by}
+            </p>
+            <details className="my-3">
+              <summary>影响、风险与数据证据</summary>
+              <pre className="overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-xs">
+                {JSON.stringify(current.evidence, null, 2)}
+              </pre>
+            </details>
+            {!canApprove && (
+              <p role="status">只读权限 · 请联系有审批权限的成员</p>
+            )}
             {current.status === 'draft' || current.status === 'executed' ? (
               <div className="mt-4 flex gap-2">
                 <Button
-                  disabled={busy || paused}
+                  disabled={!canApprove || busy || paused}
                   onClick={() => void decide('approve-and-execute')}
                 >
                   {current.status === 'executed' ? '再次批准' : '批准并执行'}
@@ -167,7 +221,7 @@ export function CommerceApprovalsPage() {
                 {current.status === 'draft' && (
                   <Button
                     variant="destructive"
-                    disabled={busy || paused}
+                    disabled={!canApprove || busy || paused}
                     onClick={() => void decide('reject')}
                   >
                     拒绝

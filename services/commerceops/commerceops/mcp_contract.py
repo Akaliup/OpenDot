@@ -3,6 +3,7 @@
 READ_TOOLS = (
     "commerceops_list_stores",
     "commerceops_profit_report",
+    "commerceops_order_summary",
     "commerceops_ads_diagnosis",
     "commerceops_inventory_risk",
     "commerceops_supplier_comparison",
@@ -10,6 +11,7 @@ READ_TOOLS = (
     "commerceops_search_sops",
     "simulate_price_change",
     "generate_weekly_report",
+    "simulate_ad_budget_reduction",
 )
 
 DRAFT_TOOLS = (

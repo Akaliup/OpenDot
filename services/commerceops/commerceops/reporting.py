@@ -68,6 +68,46 @@ def list_stores(session: Session) -> dict:
     }
 
 
+def dashboard_report(session: Session, store_code: str, start: date, end: date) -> dict:
+    store = _store(session, store_code)
+    _window(start, end)
+    if (end - start).days >= 92:
+        raise CommerceOpsError("select up to 92 days", code="invalid_period", status_code=422)
+    products = session.scalars(select(Product).where(
+        Product.workspace_id == current_workspace(), Product.store_id == store.id)).all()
+
+    def inventory_value(day):
+        total = Decimal(0)
+        for product in products:
+            snapshot = _snapshot(session, product.id, day)
+            if snapshot is None or product.currency != store.currency:
+                return None
+            total += snapshot.on_hand * product.unit_cogs
+        return total if products else None
+
+    days = []
+    for offset in range((end - start).days + 1):
+        day = start + timedelta(days=offset)
+        result = profit_report(session, store_code, day, day, False)
+        current = result["current"]
+        days.append({"day": day, "sales": current.revenue - current.discounts,
+                     "profit": current.net_profit, "spend": current.ad_spend})
+    # Inventory snapshots reflect opening stock on the following reporting date.
+    return {"daily": days, "inventory_value": inventory_value(end + timedelta(days=1)),
+            "previous_inventory_value": inventory_value(start)}
+
+
+def order_summary(session: Session, store_code: str, start: date, end: date) -> dict:
+    store = _store(session, store_code)
+    _window(start, end)
+    rows = _orders(session, store.id, start, end)
+    refunds = _refunds(session, store.id, start, end)
+    return {"store_code": store.code, "start": start, "end": end,
+            "orders": len({row.external_order_id for row in rows}), "refund_lines": len(refunds),
+            "refund_amount": sum((row.amount for row in refunds), Decimal(0)), "currency": store.currency,
+            "units": sum(row.quantity for row in rows)}
+
+
 def profit_report(session: Session, store_code: str, start: date, end: date, compare: bool = True) -> dict:
     store = _store(session, store_code)
     _window(start, end)
@@ -187,6 +227,8 @@ def ads_report(session: Session, store_code: str, start: date, end: date, compar
         "total_sales": total_sales,
         "total_sales_definition": _SALES_DEFINITION,
         "total_ad_spend": store_spend,
+        "ad_sales": store_attributed_sales,
+        "acos": store_metrics.acos,
         "tacos": store_metrics.tacos,
         "attributed_sales_note": "summed across campaigns and not deduplicated",
         "campaigns": campaign_rows,
@@ -199,6 +241,7 @@ def budget_decision(
     campaign_external_id: str,
     start: date,
     end: date,
+    reduction_percent: int | None = None,
 ) -> tuple[dict, dict]:
     report = ads_report(session, store_code, start, end, compare=True)
     match = next(
@@ -224,6 +267,12 @@ def budget_decision(
         "multiplier": ratio_str(suggestion.multiplier),
         "reason": suggestion.reason,
     }
+    if reduction_percent is not None:
+        if not 1 <= reduction_percent <= 99:
+            raise ValueError("budget reduction must be between 1 and 99 percent")
+        factor = Decimal(100 - reduction_percent) / 100
+        decision.update(reduction_percent=reduction_percent, multiplier=ratio_str(factor),
+                        to_daily_budget=money_str(suggestion.current_daily_budget * factor))
     evidence = {
         "flags": match["flags"],
         "current": _metrics_brief(match["current"]),

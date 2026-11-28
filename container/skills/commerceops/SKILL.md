@@ -3,7 +3,7 @@ name: CommerceOps
 description: Cross-border store analysis. Use CommerceOps tools for profit, ads, inventory, suppliers, competitors, price simulation, weekly reports, and SOP citations. Never invent figures. Stop at drafts for human approval.
 user-invocable: true
 argument-hint: '[store code] [question]'
-allowed-tools: commerceops_list_stores,commerceops_profit_report,commerceops_ads_diagnosis,commerceops_inventory_risk,commerceops_supplier_comparison,commerceops_competitor_diff,commerceops_search_sops,simulate_price_change,generate_weekly_report,commerceops_create_ad_budget_draft,commerceops_create_purchase_order_draft,commerceops_create_competitor_response_draft
+allowed-tools: commerceops_list_stores,commerceops_profit_report,commerceops_order_summary,commerceops_ads_diagnosis,commerceops_inventory_risk,commerceops_supplier_comparison,commerceops_competitor_diff,commerceops_search_sops,simulate_price_change,simulate_ad_budget_reduction,generate_weekly_report,commerceops_create_ad_budget_draft,commerceops_create_purchase_order_draft,commerceops_create_competitor_response_draft
 ---
 
 # CommerceOps
@@ -17,6 +17,8 @@ The host may prefix tool names. Call the CommerceOps tool that matches the name 
 Before you state a profit, margin, ACOS, ROAS, TACOS, CTR, CVR, days of cover, reorder quantity, landed cost, or competitor delta, call the matching tool and use its JSON.
 
 - Profit, margin, and the bridge: `commerceops_profit_report`
+- For a profit decline, cross-check the bridge with `commerceops_order_summary`, `commerceops_ads_diagnosis`, and `commerceops_inventory_risk`. Keep the store and dates for follow-up questions.
+- For a proposed budget cut, run `simulate_ad_budget_reduction` for each selected campaign. Quote its assumptions. Use the same reduction percentage if asked to create a draft.
 - Ads ratios and the budget ladder: `commerceops_ads_diagnosis`
 - Cover, reorder point, and suggested units: `commerceops_inventory_risk`
 - Supplier rank, MOQ, and lead-time risk: `commerceops_supplier_comparison`
