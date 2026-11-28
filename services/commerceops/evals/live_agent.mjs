@@ -140,6 +140,7 @@ async function run(id, spec, row, smoke) {
           if (!response.ok) throw Error('DeepSeek HTTP ' + response.status);
           const data = await response.json();
           row.actual_model_call = true;
+          row.model_calls++;
           for (const name of [
             'prompt_tokens',
             'completion_tokens',
@@ -239,6 +240,7 @@ for (const [i, spec] of cases.entries()) {
     generated_at,
     prompt_version: 'commerceops-en-v1',
     actual_model_call: false,
+    model_calls: 0,
     status: 'skipped',
     passed: null,
     failure_reason: missing || null,

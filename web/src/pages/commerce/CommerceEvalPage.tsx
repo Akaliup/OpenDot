@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/common/EmptyState';
-import { type Scorecard, commerce, errorText } from './api';
+import { type Scorecard, CommerceOffline, commerce, errorText } from './api';
 import { useCommerceConnection } from './connection';
 
 type AgentCard = {
@@ -10,6 +10,9 @@ type AgentCard = {
     case_id: number | string;
     status: string;
     failure_reason?: string;
+    latency_ms?: number;
+    actual_model_call?: boolean;
+    model_calls?: number;
   }[];
   summary?: {
     called: number;
@@ -43,7 +46,7 @@ export function CommerceEvalPage() {
       setMissing(body.scorecard == null);
       setOffline(false);
     } catch (error) {
-      setOffline(true);
+      setOffline(error instanceof CommerceOffline);
       setMessage(errorText(error));
     }
   }, []);
@@ -80,7 +83,7 @@ export function CommerceEvalPage() {
     <div className="flex flex-col gap-6">
       {(
         [
-          ['Live LLM Agent Evaluation', live],
+          ['DeepSeek Live LLM Evaluation', live],
           ['Scripted Agent Integration Evaluation', scripted],
         ] as const
       ).map(([title, card]) => (
@@ -88,6 +91,40 @@ export function CommerceEvalPage() {
           <h2 className="font-medium">{title}</h2>
           {card ? (
             <>
+              <p>
+                总数 {card.cases.length} · 通过{' '}
+                {card.cases.filter((c) => c.status === 'passed').length} · 失败{' '}
+                {
+                  card.cases.filter((c) =>
+                    ['failed', 'failure', 'error'].includes(c.status),
+                  ).length
+                }{' '}
+                · 跳过 {card.cases.filter((c) => c.status === 'skipped').length}
+              </p>
+              {card.summary?.called === 0 && (
+                <p>真实模型未运行 · 调用 0 次 · 平均响应时间 —</p>
+              )}
+              {!card.summary && (
+                <p>脚本化测试 · 模型调用 0 次 · 0 tokens · 未记录耗时</p>
+              )}
+              {card.summary && card.summary.called > 0 && (
+                <p>
+                  模型调用{' '}
+                  {card.cases
+                    .filter((c) => c.actual_model_call)
+                    .every((c) => c.model_calls != null)
+                    ? card.cases.reduce((n, c) => n + (c.model_calls ?? 0), 0)
+                    : '未记录'}{' '}
+                  次 · 平均案例耗时{' '}
+                  {Math.round(
+                    card.cases
+                      .filter((c) => c.actual_model_call)
+                      .reduce((n, c) => n + (c.latency_ms ?? 0), 0) /
+                      card.summary.called,
+                  )}{' '}
+                  ms
+                </p>
+              )}
               {card.summary && (
                 <p>
                   {card.model} · 实际调用 {card.summary.called} 个案例 · 跳过{' '}
@@ -140,10 +177,8 @@ export function CommerceEvalPage() {
             aria-label="评测汇总"
           >
             <h2 className="text-sm font-medium">
-              {scorecard.summary.passed}/{scorecard.summary.cases} 通过
-              {scorecard.summary.failed > 0
-                ? `，${scorecard.summary.failed} 失败`
-                : ''}
+              总数 {scorecard.summary.cases} · 通过 {scorecard.summary.passed} · 失败 {scorecard.summary.failed} ·
+              跳过 {scorecard.summary.cases - scorecard.summary.passed - scorecard.summary.failed}
             </h2>
             <p className="mt-2 text-sm text-muted-foreground">
               规划估算运营时间 {scorecard.summary.ops_minutes_saved}{' '}
@@ -155,6 +190,7 @@ export function CommerceEvalPage() {
             <p className="mt-1 text-sm text-muted-foreground">
               {scorecard.summary.token_note}
             </p>
+            <p className="text-sm text-muted-foreground">模型调用 0 次 · 未记录平均耗时</p>
             <p className="mt-1 text-xs text-muted-foreground">
               生成于 {scorecard.generated_at}
             </p>

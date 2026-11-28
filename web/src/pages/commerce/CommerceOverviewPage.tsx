@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { OperatingMetrics, type Dashboard } from './OperatingMetrics';
+import { type DraftRow } from './api';
 import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/common/EmptyState';
 import {
   COMMERCE_PERIOD,
+  CommerceOffline,
   type AdsReport,
   type CommerceMeta,
   type CompetitorReport,
@@ -33,11 +37,6 @@ function ratio(value: string | null | undefined, status?: string): string {
   return text === '-0' ? '0' : text;
 }
 
-const STORES = [
-  { code: 'us-main', label: '美国站 us-main' },
-  { code: 'uk-main', label: '英国站 uk-main' },
-];
-
 const SCENARIO_LABEL: Record<string, string> = {
   conservative: '保守',
   base: '基准',
@@ -46,7 +45,12 @@ const SCENARIO_LABEL: Record<string, string> = {
 
 export function CommerceOverviewPage() {
   const { online, epoch } = useCommerceConnection();
-  const loadedStore = useRef<string | null>(null);
+  const generation = useRef(0);
+  const [period, setPeriod] = useState(COMMERCE_PERIOD);
+  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const [drafts, setDrafts] = useState<DraftRow[]>([]);
+  const [updated, setUpdated] = useState<string>();
+  const [question, setQuestion] = useState('为什么美国站本期利润下降？');
   const [store, setStore] = useState('us-main');
   const [meta, setMeta] = useState<CommerceMeta | null>(null);
   const [profit, setProfit] = useState<ProfitReport | null>(null);
@@ -70,68 +74,114 @@ export function CommerceOverviewPage() {
   const load = useCallback(async () => {
     setLoading(true);
     setMessage('');
-    const requestStore = store;
-    if (loadedStore.current !== requestStore) {
-      setProfit(null);
-      setAds(null);
-      setInventory(null);
-      setSuppliers({});
-      setCompetitors(null);
-      setPriceSim(null);
-      setWeekly(null);
-    }
+    const version = ++generation.current;
+    const active = () => version === generation.current;
+    const errors: string[] = [];
+    setUpdated(undefined);
+    setDashboard(null);
+    setDrafts([]);
+    setProfit(null);
+    setAds(null);
+    setInventory(null);
+    setSuppliers({});
+    setCompetitors(null);
+    setPriceSim(null);
+    setWeekly(null);
     try {
       const info = await commerce<CommerceMeta>('/meta');
+      if (!active()) return;
       setMeta(info);
-      if (!info.online) {
-        setOffline(true);
+      setOffline(false);
+      if (!info.stores.length) {
+        setStore('');
         return;
       }
-      setOffline(false);
-      const query = `store_code=${store}&start_date=${COMMERCE_PERIOD.start}&end_date=${COMMERCE_PERIOD.end}`;
-      const [profitBody, adsBody, inventoryBody] = await Promise.all([
-        commerce<ProfitReport>(`/api/v1/profit?${query}`),
-        commerce<AdsReport>(`/api/v1/ads?${query}`),
-        commerce<InventoryReport>(
-          `/api/v1/inventory?store_code=${store}&as_of=${COMMERCE_PERIOD.asOf}&horizon_days=14`,
+      if (!info.stores.some((item) => item.code === store)) {
+        setStore(
+          (info.stores.find((s) => s.code === 'us-main') ?? info.stores[0])
+            .code,
+        );
+        return;
+      }
+      const code = encodeURIComponent(store);
+      const query = `store_code=${code}&start_date=${period.start}&end_date=${period.end}`;
+      async function module<T>(
+        label: string,
+        url: string,
+        apply: (data: T) => void | Promise<void>,
+      ) {
+        try {
+          const data = await commerce<T>(url);
+          if (active()) await apply(data);
+        } catch (e) {
+          errors.push(label + ' · ' + errorText(e));
+        }
+      }
+      await Promise.all([
+        module<Dashboard>('趋势', '/api/v1/dashboard?' + query, setDashboard),
+        module<{ drafts: DraftRow[] }>('行动中心', '/api/v1/drafts', (r) =>
+          setDrafts(r.drafts),
+        ),
+        module<ProfitReport>('利润', '/api/v1/profit?' + query, setProfit),
+        module<AdsReport>('广告', '/api/v1/ads?' + query, setAds),
+        module<InventoryReport>(
+          '库存',
+          `/api/v1/inventory?store_code=${code}&as_of=${period.asOf}`,
+          async (data) => {
+            setInventory(data);
+            const skus = data.skus.map((row) => row.sku);
+            setSku((current) =>
+              skus.includes(current) ? current : (skus[0] ?? ''),
+            );
+            await Promise.all(
+              data.at_risk_skus.map((item) =>
+                module<SupplierReport>(
+                  '供应商 ' + item,
+                  `/api/v1/suppliers/compare?store_code=${code}&sku=${encodeURIComponent(item)}&as_of=${period.asOf}`,
+                  (result) =>
+                    setSuppliers((prev) => ({ ...prev, [item]: result })),
+                ),
+              ),
+            );
+            const reports: CompetitorReport[] = [];
+            for (const item of skus) {
+              if (!active()) return;
+              await module<CompetitorReport>(
+                '竞品 ' + item,
+                `/api/v1/competitors/diff?store_code=${code}&sku=${encodeURIComponent(item)}&as_of=${period.asOf}`,
+                (report) => {
+                  reports.push(report);
+                },
+              );
+            }
+            if (active())
+              setCompetitors({
+                sample_data: reports.some((r) => r.sample_data),
+                comparisons: reports.flatMap((r) => r.comparisons),
+              });
+          },
         ),
       ]);
-      setProfit(profitBody);
-      setAds(adsBody);
-      setInventory(inventoryBody);
-      const quotes = await Promise.all(
-        inventoryBody.at_risk_skus.map(async (item) => {
-          const report = await commerce<SupplierReport>(
-            `/api/v1/suppliers/compare?store_code=${store}&sku=${item}&as_of=${COMMERCE_PERIOD.asOf}`,
-          );
-          return [item, report] as const;
-        }),
-      );
-      setSuppliers(Object.fromEntries(quotes));
-      if (store === 'us-main') {
-        setCompetitors(
-          await commerce<CompetitorReport>(
-            `/api/v1/competitors/diff?store_code=${store}&sku=NS-LAMP-LED&as_of=${COMMERCE_PERIOD.asOf}`,
-          ),
-        );
-      } else {
-        setCompetitors(null);
-      }
-      loadedStore.current = requestStore;
-      const codes = inventoryBody.skus.map((row) => row.sku);
-      if (codes.length > 0) {
-        setSku((current) => (codes.includes(current) ? current : codes[0]));
+      if (active()) {
+        setUpdated(new Date().toLocaleTimeString());
+        setMessage(errors.join('；'));
       }
     } catch (error) {
-      setOffline(true);
-      setMessage(errorText(error));
+      if (active()) {
+        setMeta(null);
+        setOffline(error instanceof CommerceOffline);
+        setMessage(errorText(error));
+      }
     } finally {
-      setLoading(false);
+      if (active()) setLoading(false);
     }
-  }, [store]);
+  }, [store, period]);
 
   useEffect(() => {
     void load();
+    return () => {
+      generation.current++;
+    };
   }, [load, epoch]);
 
   async function resetSeed() {
@@ -200,8 +250,8 @@ export function CommerceOverviewPage() {
             store_code: store,
             sku,
             target_price: price,
-            start_date: COMMERCE_PERIOD.start,
-            end_date: COMMERCE_PERIOD.end,
+            start_date: period.start,
+            end_date: period.end,
           }),
         },
       );
@@ -221,9 +271,9 @@ export function CommerceOverviewPage() {
       const result = await commerce<WeeklyReport>('/api/v1/reports/weekly', {
         method: 'POST',
         body: JSON.stringify({
-          start_date: COMMERCE_PERIOD.start,
-          end_date: COMMERCE_PERIOD.end,
-          as_of: COMMERCE_PERIOD.asOf,
+          start_date: period.start,
+          end_date: period.end,
+          as_of: period.asOf,
           push_feishu: true,
         }),
         timeoutMs: 60_000,
@@ -244,13 +294,80 @@ export function CommerceOverviewPage() {
   const flagged = (ads?.campaigns ?? []).filter(
     (row) => row.budget.reason !== 'no_adjustment',
   );
-  const competitorAlerts = (competitors?.comparisons ?? []).filter(
-    (row) => row.alerts.length > 0,
-  );
+  const competitorAlerts = competitors?.comparisons ?? [];
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3">
+        {meta && (
+          <details className="relative">
+            <summary className="cursor-pointer rounded-lg bg-blue-600 px-4 py-2 text-white">
+              AI 经营分析助手
+            </summary>
+            <div className="absolute z-10 mt-2 grid w-72 gap-3 rounded-xl border bg-card p-4 shadow-lg">
+              <label>
+                经营问题
+                <textarea
+                  className="mt-2 w-full rounded-lg border p-2"
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                />
+              </label>
+              <Link
+                className="text-blue-600"
+                state={{
+                  commerceQuestion: `店铺 ${store} · ${period.start} 至 ${period.end} · 库存截至 ${period.asOf}。请引用 CommerceOps 工具证据。
+${question}`,
+                  commerceWorkspace: meta.workspace_id,
+                }}
+                to={'/chat/' + encodeURIComponent(meta.workspace_id)}
+              >
+                在工作区会话中继续
+              </Link>
+            </div>
+          </details>
+        )}
+        <a
+          href="#commerce-import"
+          onClick={(e) => {
+            e.preventDefault();
+            document.getElementById('commerce-import')?.scrollIntoView();
+          }}
+        >
+          导入 CSV
+        </a>
+        <label>
+          开始{' '}
+          <input
+            type="date"
+            value={period.start}
+            max={period.end}
+            onChange={(e) => {
+              if (e.target.value)
+                setPeriod({ ...period, start: e.target.value });
+            }}
+          />
+        </label>
+        <label>
+          结束{' '}
+          <input
+            type="date"
+            value={period.end}
+            min={period.start}
+            onChange={(e) => {
+              if (e.target.value)
+                setPeriod({
+                  ...period,
+                  end: e.target.value,
+                  asOf: new Date(Date.parse(e.target.value) + 86400000)
+                    .toISOString()
+                    .slice(0, 10),
+                });
+            }}
+          />
+        </label>
+        {updated && <small>更新于 {updated}</small>}
+        {competitors?.sample_data && <small>含演示样本</small>}
         <label
           className="text-sm text-muted-foreground"
           htmlFor="commerce-store"
@@ -263,9 +380,9 @@ export function CommerceOverviewPage() {
           value={store}
           onChange={(event) => setStore(event.target.value)}
         >
-          {STORES.map((item) => (
+          {meta?.stores.map((item) => (
             <option key={item.code} value={item.code}>
-              {item.label}
+              {item.name}
             </option>
           ))}
         </select>
@@ -278,7 +395,7 @@ export function CommerceOverviewPage() {
           刷新
         </Button>
         <Button variant="outline" onClick={() => void resetSeed()}>
-          重置演示数据
+          {meta?.stores.length ? '重置演示数据' : '加载演示数据'}
         </Button>
         <Button
           variant="outline"
@@ -300,6 +417,12 @@ export function CommerceOverviewPage() {
           {message}
         </p>
       )}
+      {loading && <p role="status">正在读取工作区经营数据…</p>}
+      {!loading && meta?.stores.length === 0 && (
+        <p role="status">
+          当前工作区还没有店铺。可加载演示店铺，或请管理员配置店铺和 SKU 后导入 CSV。
+        </p>
+      )}
       {offline && !profit ? (
         <EmptyState
           title="CommerceOps 未连接"
@@ -308,149 +431,252 @@ export function CommerceOverviewPage() {
           }
         />
       ) : null}
-      {profit && (
-        <section
-          className="rounded-xl border border-border bg-card/40 p-4"
-          aria-label="利润桥"
-        >
-          <h2 className="text-sm font-medium">
-            演示窗口 {COMMERCE_PERIOD.start} 至 {COMMERCE_PERIOD.end}
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            这是历史样本，不是本周。美国站时区 America/New_York，英国站时区 Europe/London。
-            统计日 {COMMERCE_PERIOD.asOf}。
-          </p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {profit.units_sold === 0
-              ? '数据不足。这个窗口没有可计算的销量。'
-              : `${profit.currency} 本期 ${money(profit.current.net_profit)}，上期 ${money(profit.previous?.net_profit)}，差额 ${money(profit.bridge?.delta_net_profit)}。桥接恒等式 ${profit.bridge?.identity_ok ? '成立' : '不成立'}。 销量 ${profit.units_sold}。`}
-          </p>
-          <table className="mt-3 w-full text-left text-sm [&_td]:pr-4 [&_th]:pr-4">
-            <thead className="text-muted-foreground">
-              <tr>
-                <th className="py-2 font-medium">因素</th>
-                <th className="py-2 font-medium">对利润的贡献</th>
-              </tr>
-            </thead>
-            <tbody>
-              {profit.bridge?.components.map((row) => (
-                <tr key={row.code} className="border-t border-border">
-                  <td className="py-2">{row.code}</td>
-                  <td className="py-2">{money(row.contribution)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
+      {profit?.units_sold === 0 && !Number(profit.current.revenue) && (
+        <p role="status" className="rounded-lg border bg-muted/30 p-4">
+          所选日期没有订单销售记录。可调整日期或导入 CSV。
+        </p>
       )}
-      {ads && (
-        <section
-          className="rounded-xl border border-border bg-card/40 p-4"
-          aria-label="广告异常"
-        >
-          <h2 className="text-sm font-medium">高 ACOS / 转化下滑</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            广告花费 {money(ads.total_ad_spend)}，商品销售额{' '}
-            {money(ads.total_sales)}，TACOS{' '}
-            {ratio(ads.tacos.value, ads.tacos.status)}
-          </p>
-          {flagged.length === 0 ? (
-            <p className="mt-3 text-sm text-muted-foreground">
-              这个窗口没有需要削减的活动。
+      {store && (dashboard || profit) && (
+        <OperatingMetrics profit={profit} data={dashboard} />
+      )}
+      <div className="grid items-start gap-4 xl:grid-cols-2 [&>section]:min-w-0 [&>section]:overflow-x-auto">
+        {profit && (
+          <section
+            className="rounded-xl border border-border bg-card/40 p-4"
+            aria-label="利润桥"
+          >
+            <h2 className="text-sm font-medium">
+              利润归因 · {period.start} 至 {period.end}
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              店铺时区 {meta?.stores.find((s) => s.code === store)?.timezone}。
+              统计日 {period.asOf}。
             </p>
-          ) : (
+            <p className="mt-2 text-sm text-muted-foreground">
+              {profit.units_sold === 0
+                ? '数据不足。这个窗口没有可计算的销量。'
+                : `${profit.currency} 本期 ${money(profit.current.net_profit)}，上期 ${money(profit.previous?.net_profit)}，差额 ${money(profit.bridge?.delta_net_profit)}。桥接恒等式 ${profit.bridge?.identity_ok ? '成立' : '不成立'}。 销量 ${profit.units_sold}。`}
+            </p>
             <table className="mt-3 w-full text-left text-sm [&_td]:pr-4 [&_th]:pr-4">
               <thead className="text-muted-foreground">
                 <tr>
-                  <th className="py-2 font-medium">活动</th>
-                  <th className="py-2 font-medium">ACOS</th>
-                  <th className="py-2 font-medium">建议预算</th>
+                  <th className="py-2 font-medium">因素</th>
+                  <th className="py-2 font-medium">对利润的贡献</th>
                 </tr>
               </thead>
               <tbody>
-                {flagged.map((row) => (
-                  <tr
-                    key={row.campaign_external_id}
-                    className="border-t border-border"
-                  >
-                    <td className="py-2 whitespace-nowrap">
-                      {row.name}
-                      <span className="text-muted-foreground">
-                        {' '}
-                        ({row.flags.join(', ')})
-                      </span>
+                {profit.bridge?.components.map((row) => (
+                  <tr key={row.code} className="border-t border-border">
+                    <td className="py-2">
+                      {(
+                        {
+                          revenue: '销售收入',
+                          discounts: '折扣',
+                          refunds: '退款',
+                          net_cogs: '商品成本',
+                          platform_fees: '平台费用',
+                          shipping_fees: '物流费用',
+                          ad_spend: '广告成本',
+                          other_fees: '其他费用',
+                        } as Record<string, string>
+                      )[row.code] ?? row.code}
                     </td>
-                    <td className="py-2 whitespace-nowrap">
-                      {ratio(row.current.acos.value, row.current.acos.status)}
-                    </td>
-                    <td className="py-2 whitespace-nowrap">
-                      {money(row.budget.current_daily_budget)} →{' '}
-                      {money(row.budget.suggested_daily_budget)}
-                      <span className="text-muted-foreground">
-                        {' '}
-                        ({row.budget.reason})
-                      </span>
+                    <td className="py-2">
+                      <div className="flex items-center gap-3">
+                        {money(row.contribution)}
+                        <span
+                          className={
+                            Number(row.contribution) < 0
+                              ? 'h-2 rounded bg-orange-400'
+                              : 'h-2 rounded bg-blue-500'
+                          }
+                          style={{
+                            width:
+                              (Math.abs(Number(row.contribution)) /
+                                Math.max(
+                                  1,
+                                  ...(profit.bridge?.components ?? []).map(
+                                    (c) => Math.abs(Number(c.contribution)),
+                                  ),
+                                )) *
+                                55 +
+                              '%',
+                          }}
+                        />
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          )}
-        </section>
-      )}
-      {inventory && (
-        <section
-          className="rounded-xl border border-border bg-card/40 p-4"
-          aria-label="库存与供应商"
-        >
-          <h2 className="text-sm font-medium">14 天内可能断货</h2>
-          {inventory.at_risk_skus.length === 0 ? (
-            <p className="mt-3 text-sm text-muted-foreground">
-              没有落入 14 天覆盖窗口的 SKU。
+          </section>
+        )}
+        {ads && (
+          <section
+            className="rounded-xl border border-border bg-card/40 p-4"
+            aria-label="广告异常"
+          >
+            <h2 className="text-sm font-medium">高 ACOS / 转化下滑</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              广告花费 {money(ads.total_ad_spend)}，广告销售额{' '}
+              {money(ads.ad_sales)}，ACOS {ratio(ads.acos?.value)}，商品销售额{' '}
+              {money(ads.total_sales)}，TACOS{' '}
+              {ratio(ads.tacos.value, ads.tacos.status)}
             </p>
-          ) : (
-            <ul className="mt-3 flex flex-col gap-3 text-sm">
-              {inventory.at_risk_skus.map((sku) => {
-                const row = inventory.skus.find((item) => item.sku === sku);
-                const top = suppliers[sku]?.rank.rankings[0];
-                return (
-                  <li key={sku} className="border-t border-border pt-3">
-                    <p>
-                      {sku} 覆盖{' '}
-                      {row?.cover?.days_of_cover ?? row?.cover?.status}{' '}
-                      天，建议量{' '}
-                      {row?.replenishment?.suggested_order_qty ?? '—'}
-                    </p>
-                    <p className="text-muted-foreground">
-                      {top
-                        ? `首选 ${top.supplier_code}，到岸成本 ${top.landed_cost}，采购量 ${top.adjusted_order_qty}，交期风险 ${top.lead_time_risk}`
-                        : '没有供应商报价'}
-                    </p>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-      )}
-      {competitors && (
-        <section
-          className="rounded-xl border border-border bg-card/40 p-4"
-          aria-label="竞品提醒"
-        >
-          <h2 className="text-sm font-medium">
-            竞品快照 {competitors.sample_data ? '（演示样本）' : ''}
-          </h2>
-          <ul className="mt-3 flex flex-col gap-2 text-sm">
-            {competitorAlerts.map((row) => (
-              <li key={row.competitor_asin}>
-                {row.competitor_asin}：{row.alerts.join(', ')}，价格变化{' '}
-                {row.price_change}，来源 {row.source}
-              </li>
+            {flagged.length === 0 ? (
+              <p className="mt-3 text-sm text-muted-foreground">
+                这个窗口没有需要削减的活动。
+              </p>
+            ) : (
+              <table className="mt-3 w-full text-left text-sm [&_td]:pr-4 [&_th]:pr-4">
+                <thead className="text-muted-foreground">
+                  <tr>
+                    <th className="py-2 font-medium">活动与证据</th>
+                    <th className="py-2 font-medium">ACOS</th>
+                    <th className="py-2 font-medium">建议预算</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {flagged.map((row) => (
+                    <tr
+                      key={row.campaign_external_id}
+                      className="border-t border-border"
+                    >
+                      <td className="py-2 whitespace-nowrap">
+                        {row.name}
+                        <details className="text-xs">
+                          <summary className="cursor-pointer text-blue-600">查看详情</summary>
+                          <p>SKU {row.sku ?? '—'} · 花费 {money(row.current.spend)} · 转化率 {ratio(row.current.cvr.value, row.current.cvr.status)}</p>
+                        </details>
+                        <span className="text-muted-foreground">
+                          {' '}
+                          ({row.flags.join(', ')})
+                        </span>
+                      </td>
+                      <td className="py-2 whitespace-nowrap">
+                        {ratio(row.current.acos.value, row.current.acos.status)}
+                      </td>
+                      <td className="py-2 whitespace-nowrap">
+                        {money(row.budget.current_daily_budget)} →{' '}
+                        {money(row.budget.suggested_daily_budget)}
+                        <span className="text-muted-foreground">
+                          {' '}
+                          ({row.budget.reason}){' '}
+                          <button
+                            className="text-blue-600"
+                            onClick={async () => {
+                              try {
+                                await commerce('/api/v1/ads/budget-drafts', {
+                                  method: 'POST',
+                                  body: JSON.stringify({
+                                    store_code: store,
+                                    campaign_external_id:
+                                      row.campaign_external_id,
+                                    start_date: period.start,
+                                    end_date: period.end,
+                                  }),
+                                });
+                                await load();
+                                setMessage('草案已创建，请前往审批中心。');
+                              } catch (e) {
+                                setMessage(errorText(e));
+                              }
+                            }}
+                          >
+                            生成调整草案
+                          </button>
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+        )}
+        {inventory && (
+          <section
+            className="rounded-xl border border-border bg-card/40 p-4"
+            aria-label="库存与供应商"
+          >
+            <h2 className="text-sm font-medium">
+              库存风险 · {inventory.skus.length} 个 SKU，
+              {inventory.skus.filter((item) => item.cover && item.replenishment?.reorder_point != null &&
+                item.cover.available < Number(item.replenishment.reorder_point)).length} 个低于补货点，
+              {inventory.at_risk_skus.length} 个预计断货
+            </h2>
+            {inventory.at_risk_skus.length === 0 ? (
+              <p className="mt-3 text-sm text-muted-foreground">
+                没有识别到 14 天内的断货风险。
+              </p>
+            ) : (
+              <ul className="mt-3 flex flex-col gap-3 text-sm">
+                {inventory.at_risk_skus.map((sku) => {
+                  const row = inventory.skus.find((item) => item.sku === sku);
+                  const top = suppliers[sku]?.rank.rankings[0];
+                  return (
+                    <li key={sku} className="border-t border-border pt-3">
+                      <p>
+                        <span
+                          className={
+                            Number(row?.cover?.days_of_cover) <= 7
+                              ? 'text-red-700'
+                              : 'text-amber-700'
+                          }
+                        >
+                          {Number(row?.cover?.days_of_cover) <= 7
+                            ? '高风险'
+                            : '预警'}
+                        </span>{' '}
+                        · {sku} 覆盖{' '}
+                        {row?.cover?.days_of_cover ?? row?.cover?.status}{' '}
+                        天，建议量{' '}
+                        {row?.replenishment?.suggested_order_qty ?? '—'}
+                      </p>
+                      <p className="text-muted-foreground">
+                        {top
+                          ? `首选 ${top.supplier_code}，到岸成本 ${top.landed_cost}，采购量 ${top.adjusted_order_qty}，交期风险 ${top.lead_time_risk}`
+                          : '没有供应商报价'}
+                      </p>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {inventory.skus.filter((item) => !item.at_risk).map((item) => (
+              <p key={item.sku} className="mt-2 text-sm">
+                {item.sku} · {item.cover?.days_of_cover != null
+                  ? <span className="text-green-700">正常 · 覆盖 {item.cover.days_of_cover} 天</span>
+                  : '库存快照或销量不足'}
+              </p>
             ))}
-          </ul>
-        </section>
-      )}
+          </section>
+        )}
+        {competitors && (
+          <section
+            className="rounded-xl border border-border bg-card/40 p-4"
+            aria-label="竞品提醒"
+          >
+            <h2 className="text-sm font-medium">
+              竞品快照 {competitors.sample_data ? '（演示样本）' : ''}
+            </h2>
+            <ul className="mt-3 flex flex-col gap-2 text-sm">
+              {!competitorAlerts.length && <li>所选日期没有可用的竞品快照，可导入竞品 CSV。</li>}
+              {competitorAlerts.map((row) => (
+                <li key={row.competitor_asin}>
+                  {row.competitor_asin}：{row.alerts.join(', ')}，价格变化{' '}
+                  {row.price_change}（
+                  {row.price_change_pct == null
+                    ? '—'
+                    : (Number(row.price_change_pct) * 100).toFixed(1) + '%'}
+                  ），{money(row.older_price)} → {money(row.newer_price)} ·{' '}
+                  {row.newer_captured_at} · {row.source}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
       <section
         className="rounded-xl border border-border bg-card/40 p-4"
         aria-label="价格模拟"
@@ -575,6 +801,7 @@ export function CommerceOverviewPage() {
       )}
       <section
         className="rounded-xl border border-border bg-card/40 p-4"
+        id="commerce-import"
         aria-label="导入"
       >
         <h2 className="text-sm font-medium">CSV 导入</h2>
@@ -616,13 +843,42 @@ export function CommerceOverviewPage() {
           />
         </div>
       </section>
+      <section className="rounded-xl border bg-card p-5">
+        <h2 className="font-semibold">行动中心</h2>
+        <p>
+          当前工作区 · 待审批{' '}
+          {drafts.filter((d) => d.status === 'draft').length} · 已批准{' '}
+          {drafts.filter((d) => d.status === 'approved').length} · 已拒绝{' '}
+          {drafts.filter((d) => d.status === 'rejected').length} · 已执行{' '}
+          {drafts.filter((d) => d.status === 'executed').length}
+        </p>
+        {drafts.filter((d) => d.status === 'draft').map((draft) => (
+          <p key={draft.draft_id}>
+            <Link className="text-blue-600" to={'/commerce/approvals?draft=' + encodeURIComponent(draft.draft_id)}>
+              审核 {draft.action_type} · {draft.draft_id}
+            </Link>
+          </p>
+        ))}
+        {drafts
+          .filter((d) => d.status === 'executed')
+          .slice(0, 3)
+          .map((d) => (
+            <p key={d.draft_id}>
+              {d.action_type} · {d.execution_ref}
+            </p>
+          ))}
+        <Link className="text-blue-600" to="/commerce/approvals">
+          查看草案、证据与执行记录
+        </Link>
+      </section>
       {meta && (
         <details className="text-sm text-muted-foreground">
           <summary className="cursor-pointer">MCP 与 Skill 注册</summary>
           <p className="mt-2">
             Skill <code>{meta.skill.path}</code> 已作为项目 Skill。下面的 stdio
             配置不会改动已有 MCP，需要时再添加 id{' '}
-            <code>{meta.mcp_preset.id}</code>。
+            <code>{meta.mcp_preset.id}</code>。在运行 MCP 的宿主中配置同一业务数据库的
+            COMMERCEOPS_DATABASE_URL，并确认该工作区可以调用工具。
           </p>
           <pre className="mt-2 overflow-auto rounded-lg bg-muted p-3 text-xs text-foreground">
             {JSON.stringify(meta.mcp_preset, null, 2)}

@@ -37,6 +37,7 @@ from commerceops.reporting import (
     ads_report,
     competitor_report,
     inventory_report,
+    dashboard_report,
     list_stores,
     price_simulation,
     profit_report,
@@ -169,6 +170,10 @@ def create_app(database_url: str | None = None) -> FastAPI:
     @app.get("/api/v1/stores")
     def stores(session: Session = Depends(get_session)) -> dict:
         return to_jsonable(list_stores(session))
+
+    @app.get("/api/v1/dashboard")
+    def dashboard(store_code: str, start_date: date, end_date: date, session: Session = Depends(get_session)) -> dict:
+        return to_jsonable(dashboard_report(session, store_code, start_date, end_date))
 
     @app.get("/api/v1/profit")
     def profit(

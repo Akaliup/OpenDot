@@ -14,6 +14,7 @@ services:
       COMMERCEOPS_HOST: '0.0.0.0'
       COMMERCEOPS_PORT: '8077'
       COMMERCEOPS_AUTO_SEED: '1'
+      COMMERCEOPS_WORKSPACE_ID: '${COMMERCEOPS_WORKSPACE_ID:-main}'
       COMMERCEOPS_DATABASE_URL: 'sqlite:////data/commerceops.db'
       COMMERCEOPS_NOTIFY_LOG: '/data/notifications.jsonl'
       COMMERCEOPS_EVAL_DIR: '/data/evals'

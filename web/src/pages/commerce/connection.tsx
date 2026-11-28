@@ -5,7 +5,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { commerce, type CommerceMeta } from './api';
+import { CommerceOffline, commerce, type CommerceMeta } from './api';
 
 interface CommerceConnection {
   online: boolean | null;
@@ -37,10 +37,10 @@ export function CommerceConnectionProvider({
         if (previous === false && next) setEpoch((value) => value + 1);
         previous = next;
         setOnline(next);
-      } catch {
+      } catch (error) {
         if (stop) return;
-        previous = false;
-        setOnline(false);
+        previous = error instanceof CommerceOffline ? false : null;
+        setOnline(previous);
       }
     }
 

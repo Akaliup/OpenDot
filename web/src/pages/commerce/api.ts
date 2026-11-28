@@ -26,6 +26,10 @@ function isApiError(error: unknown): error is ApiError {
 
 export function errorText(error: unknown): string {
   if (error instanceof CommerceOffline) return error.message;
+  if (isApiError(error) && error.status === 403)
+    return '无权访问当前工作区或店铺，请切换工作区或联系管理员。';
+  if (isApiError(error) && error.message === 'store_not_found')
+    return '当前工作区没有此店铺，请刷新店铺列表。';
   if (isApiError(error)) return error.message || '请求失败';
   return '请求失败';
 }
@@ -37,7 +41,11 @@ export async function commerce<T>(
   try {
     return await apiFetch<T>(`/api/commerceops${path}`, options);
   } catch (error) {
-    if (isApiError(error) && error.status === 503) throw new CommerceOffline();
+    if (
+      isApiError(error) &&
+      (error.status === 0 || error.body?.code === 'commerceops_offline')
+    )
+      throw new CommerceOffline();
     throw error;
   }
 }
@@ -55,10 +63,18 @@ export interface ProfitReport {
     margin: string | null;
     margin_status: string;
     revenue: string;
+    discounts: string;
     refunds: string;
     ad_spend: string;
   };
-  previous: { net_profit: string; refunds: string; ad_spend: string } | null;
+  previous: {
+    revenue: string;
+    discounts: string;
+    margin: string | null;
+    net_profit: string;
+    refunds: string;
+    ad_spend: string;
+  } | null;
   bridge: {
     delta_net_profit: string;
     identity_ok: boolean;
@@ -70,6 +86,8 @@ export interface ProfitReport {
 export interface AdsReport {
   total_sales: string;
   total_ad_spend: string;
+  ad_sales: string;
+  acos: Ratio;
   tacos: Ratio;
   campaigns: {
     campaign_external_id: string;
@@ -91,7 +109,7 @@ export interface InventoryReport {
     sku: string;
     at_risk: boolean;
     status: string;
-    cover?: { days_of_cover: string | null; status: string };
+    cover?: { available: number; days_of_cover: string | null; status: string };
     replenishment?: {
       suggested_order_qty: number | null;
       reorder_point: string | null;
@@ -118,6 +136,10 @@ export interface CompetitorReport {
     competitor_asin: string;
     alerts: string[];
     source: string;
+    older_price?: string;
+    newer_price?: string;
+    newer_captured_at?: string;
+    price_change_pct?: string;
     price_change: string;
   }[];
 }
@@ -213,6 +235,8 @@ export interface WeeklyReport {
 }
 
 export interface CommerceMeta {
+  stores: { code: string; name: string; currency: string; timezone: string }[];
+  workspace_id: string;
   online: boolean;
   api_url: string;
   mcp_preset: {

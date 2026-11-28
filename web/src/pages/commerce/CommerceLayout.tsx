@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+import './commerce.css';
 import { NavLink, Outlet } from 'react-router-dom';
 import {
   CommerceConnectionProvider,
@@ -14,13 +15,12 @@ const links = [
 export function CommerceLayout() {
   return (
     <CommerceConnectionProvider>
-      <div className="min-h-full px-4 py-5 sm:px-6 lg:px-8 lg:py-8">
+      <div className="commerce-workspace min-h-full px-4 py-5 sm:px-6 lg:px-8 lg:py-8">
         <div className="mx-auto flex max-w-6xl flex-col gap-6">
           <header>
-            <h1 className="product-page-title">经营</h1>
+            <h1 className="product-page-title">CommerceOps</h1>
             <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
-              数字来自 CommerceOps
-              计算引擎。预算、采购和竞品动作先成为草案，批准后才写入。
+              AI-Powered Commerce Intelligence
             </p>
           </header>
           <nav

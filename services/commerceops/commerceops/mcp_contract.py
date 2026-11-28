@@ -11,6 +11,7 @@ READ_TOOLS = (
     "commerceops_search_sops",
     "simulate_price_change",
     "generate_weekly_report",
+    "simulate_ad_budget_reduction",
 )
 
 DRAFT_TOOLS = (

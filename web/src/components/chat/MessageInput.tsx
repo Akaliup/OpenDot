@@ -183,7 +183,15 @@ export function MessageInput({
 
     // Load draft for new group
     const draft = groupJid ? drafts[groupJid] || '' : '';
-    setContent(draft);
+    const handoff = window.history.state?.usr;
+    const routeFolder = window.location.pathname.split('/chat/')[1]?.split('/')[0];
+    const commerceQuestion = groupJid && routeFolder && encodeURIComponent(handoff?.commerceWorkspace ?? '') === routeFolder
+      && typeof handoff?.commerceQuestion === 'string' ? handoff.commerceQuestion : '';
+    setContent([draft, commerceQuestion].filter(Boolean).join('\n\n'));
+    if (commerceQuestion) {
+      const {commerceQuestion: _question, commerceWorkspace: _workspace, ...rest} = handoff;
+      window.history.replaceState({...window.history.state, usr:rest}, '');
+    }
     // Drop pending attachments staged for the previous group — they must not
     // leak into the newly-selected conversation (会话隔离). Release image
     // preview object URLs to avoid a memory leak.
